@@ -79,6 +79,13 @@ This mod aims to provide basic support for the Wildsea RPG system (See the [Myth
 
 It currently adds a ship character sheet mimicking the layout of the official sheet.
 
+### Pathfinder 1e Character Sheet
+
+This mod adds a Pathfinder 1st Edition character sheet tab to shapes marked as characters.
+
+It supports importing a character from a Hero Lab XML export, two-way HP tracker sync, and dice rolls driven by the token's custom data.
+See `packages/pf1e-char-sheet/README.md` for details.
+
 ### 3. API
 
 _The fate of this package is still a bit undecided. A proper official api package doesn't exist yet as the mod api is still in very early stages._

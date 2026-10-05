@@ -1,0 +1,14 @@
+[mod]
+apiSchema = "0.1.0"
+tag = "pf1e-sheet"
+name = "Pathfinder 1e Character Sheet"
+version = "0.17.0"
+author = "your-name-here"
+shortDescription = "A Pathfinder 1e character sheet with Hero Lab import"
+
+description = """
+Adds a Pathfinder 1st Edition character sheet tab to shapes marked as characters.
+
+Supports importing a character directly from a Hero Lab XML export (File > Export > XML)
+to populate abilities, combat stats, skills, feats and spells automatically.
+"""
