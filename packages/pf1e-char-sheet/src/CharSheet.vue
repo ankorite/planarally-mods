@@ -13,11 +13,14 @@ import {
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { syncAuras } from "./auras";
 import {
+    attackFormula,
     buildElements,
     buildSheet,
     checkFormula,
     field,
     holdCustomDataLease,
+    iterativeBonuses,
+    ordinal,
     removeCustomData,
     syncCustomData,
 } from "./customdata";
@@ -497,14 +500,24 @@ function rollMod(label: string, fieldName: string | undefined): void {
     void doRoll(label, checkFormula(fieldName));
 }
 
-function rollAttack(i: number): void {
+/** Rolls the `n`th (0-based) iterative attack of attack row `i`. */
+function rollAttack(i: number, n: number): void {
     const name = data.value.combat.attacks[i]?.name ?? "attack";
-    const fieldName = sheetNames.value.attacks[i]?.atk;
-    if (!fieldName) {
+    const entry = sheetNames.value.attacks[i];
+    const offset = entry?.offsets[n];
+    if (!entry?.atk || offset === undefined) {
         rollStatus.value = `${name} has no attack bonus to roll.`;
         return;
     }
-    void doRoll(`Attack: ${name}`, checkFormula(fieldName));
+    const which = entry.offsets.length > 1 ? ` (${ordinal(n + 1)} attack)` : "";
+    void doRoll(`Attack: ${name}${which}`, attackFormula(entry.atk, offset));
+}
+
+/** The button text for one iterative attack: its bonus, "+13". */
+function attackBonusLabel(i: number, n: number): string {
+    const bonus = iterativeBonuses(data.value.combat.attacks[i]?.bonus ?? "")[n];
+    if (bonus === undefined) return "Atk";
+    return bonus < 0 ? `${bonus}` : `+${bonus}`;
 }
 
 function rollDamage(i: number): void {
@@ -792,7 +805,17 @@ function fmt(n: number): string {
                         <td><span class="val">{{ atk.critical }}</span></td>
                         <td><span class="val">{{ atk.damageType }}</span></td>
                         <td class="roll-cell">
-                            <button type="button" :disabled="rolling || !sheetNames.attacks[i]?.atk" @click="rollAttack(i)">Atk</button>
+                            <button v-if="!sheetNames.attacks[i]?.atk" type="button" disabled>Atk</button>
+                            <button
+                                v-for="(_, n) of sheetNames.attacks[i]?.atk ? sheetNames.attacks[i]!.offsets : []"
+                                :key="n"
+                                type="button"
+                                :disabled="rolling"
+                                :title="`Roll ${ordinal(n + 1)} attack`"
+                                @click="rollAttack(i, n)"
+                            >
+                                {{ attackBonusLabel(i, n) }}
+                            </button>
                             <button v-if="sheetNames.attacks[i]?.dmg" type="button" :disabled="rolling" @click="rollDamage(i)">Dmg</button>
                         </td>
                     </tr>

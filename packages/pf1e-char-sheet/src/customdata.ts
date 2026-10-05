@@ -40,10 +40,26 @@ function baseClass(name: string): string {
     return cdName(name.replace(/\s*\(.*$/, ""));
 }
 
-/** First bonus of an iterative attack string: "+13/+8" -> 13. */
+/** First bonus in a piece of text: "+13" -> 13. */
 function firstBonus(text: string): number | undefined {
     const m = /[+-]?\d+/.exec(text);
     return m ? Number(m[0]) : undefined;
+}
+
+/** Every bonus of an iterative attack string, in order: "+13/+8/+3" -> [13, 8, 3]. */
+export function iterativeBonuses(text: string): number[] {
+    return text
+        .replace(/\([^)]*\)/g, "")
+        .split("/")
+        .map(firstBonus)
+        .filter((b): b is number => b !== undefined);
+}
+
+/** "1st", "2nd", "3rd", "4th" ... */
+export function ordinal(n: number): string {
+    const tens = n % 100;
+    if (tens >= 11 && tens <= 13) return `${n}th`;
+    return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
 /** `{Spellcraft}`: PA's variable syntax for "the Custom Data field with this name". */
@@ -51,6 +67,15 @@ export const field = (name: string): string => `{${name}}`;
 
 /** A d20 check using a Custom Data field for its modifier: `1d20 + {STR mod}`. */
 export const checkFormula = (fieldName: string): string => `1d20 + ${field(fieldName)}`;
+
+/**
+ * An iterative attack: a d20 check on the weapon's first-attack field, shifted by this attack's offset
+ * from it: `1d20 + {Atk greatsword} - 5`. Every attack follows an edit of that one field.
+ */
+export function attackFormula(fieldName: string, offset: number): string {
+    if (offset === 0) return checkFormula(fieldName);
+    return `${checkFormula(fieldName)} ${offset < 0 ? "-" : "+"} ${Math.abs(offset)}`;
+}
 
 /**
  * The exact names of the fields the sheet's buttons roll against, as exported. They are read back from
@@ -66,8 +91,11 @@ export interface SheetNames {
     cmb: string;
     /** One per entry of `character.skills`, same order. */
     skills: string[];
-    /** One per entry of `character.combat.attacks`, same order; a missing one means nothing to roll. */
-    attacks: { atk?: string; dmg?: string }[];
+    /**
+     * One per entry of `character.combat.attacks`, same order. `atk` is the first attack's field (missing
+     * means nothing to roll); `offsets` has one entry per iterative attack, relative to it ([0, -5, -10]).
+     */
+    attacks: { atk?: string; offsets: number[]; dmg?: string }[];
 }
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
@@ -122,14 +150,19 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
     for (const skill of c.skills) skills.push(add("/skills", skill.name, "number", num(skill.total)));
 
     // Attacks: the first iterative attack bonus is a number (so a buff can be typed in as a Custom Data
-    // edit and every roll follows), the damage formula is a rollable dice-expression. A flat damage
-    // figure ("6") has nothing to roll and gets no field.
+    // edit and every roll follows); the later attacks are offsets from it, not fields of their own. The
+    // damage formula is a rollable dice-expression. A flat damage figure ("6") has nothing to roll and
+    // gets no field.
     const attacks: SheetNames["attacks"] = [];
     for (const atk of c.combat.attacks) {
         const label = atk.name.trim();
-        const entry: { atk?: string; dmg?: string } = {};
-        const bonus = firstBonus(atk.bonus);
-        if (bonus !== undefined) entry.atk = add("/attacks", `Atk ${label}`, "number", bonus);
+        const bonuses = iterativeBonuses(atk.bonus);
+        const first = bonuses[0];
+        const entry: SheetNames["attacks"][number] = { offsets: [] };
+        if (first !== undefined) {
+            entry.atk = add("/attacks", `Atk ${label}`, "number", first);
+            entry.offsets = bonuses.map((b) => b - first);
+        }
         if (/\d\s*d\s*\d/i.test(atk.damage)) {
             entry.dmg = add("/attacks", `Dmg ${label}`, "dice-expression", atk.damage.trim());
         }
@@ -153,8 +186,13 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
         if (fieldName) add("/rolls", `Roll ${skill.name}`, "dice-expression", checkFormula(fieldName));
     });
     c.combat.attacks.forEach((atk, i) => {
-        const fieldName = attacks[i]?.atk;
-        if (fieldName) add("/rolls", `Roll Attack ${atk.name.trim()}`, "dice-expression", checkFormula(fieldName));
+        const entry = attacks[i];
+        if (!entry?.atk) return;
+        const base = `Roll Attack ${atk.name.trim()}`;
+        entry.offsets.forEach((offset, n) => {
+            const name = entry.offsets.length > 1 ? `${base} ${ordinal(n + 1)}` : base;
+            add("/rolls", name, "dice-expression", attackFormula(entry.atk!, offset));
+        });
     });
 
     return {
