@@ -2,7 +2,7 @@ import type { ApiModMeta, GameApi, LocalId, ModEvents } from "@planarally/mod-ap
 
 import CharSheet from "./CharSheet.vue";
 import { DATA_BLOCK_NAME, emptyCharacter, type PF1Character } from "./data";
-import { diagState, exposeDebugHandle, installBusListeners, note, quickSummary } from "./diagnostics";
+import { diagState, exposeDebugHandle, installBusListeners, note } from "./diagnostics";
 import { isHpTrackerName, realTrackers, subscribeToBus } from "./trackers";
 
 // Shared game API handle, set in initGame and used throughout the mod.
@@ -33,13 +33,12 @@ async function initGame(gameApi: GameApi): Promise<void> {
         note(`tracker event subscription failed: ${String(e)}`);
     }
 
-    // Diagnostics (see diagnostics.ts): console handle, event-bus logging, startup summary.
+    // Diagnostics (see diagnostics.ts): console handle and the event log the reports show.
     try {
         exposeDebugHandle(api, () => api.systemsState?.selected?.reactive?.focus);
         installBusListeners(api);
-        console.log(`[pf1e-diag] quick summary:\n${quickSummary(api)}`);
     } catch (e) {
-        console.log(`[pf1e-diag] startup probe failed: ${String(e)}`);
+        note(`diagnostics setup failed: ${String(e)}`);
     }
 }
 

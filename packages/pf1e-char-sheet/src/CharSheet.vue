@@ -26,22 +26,7 @@ import {
 } from "./customdata";
 import { pushHp, type HpPushResult } from "./trackers";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
-import {
-    buildDeepData,
-    buildDeepDice,
-    buildBundleScan,
-    buildDeepHooks,
-    buildNativeDiceScan,
-    buildReport,
-    runAllLocalTests,
-    runAuraSelfTest,
-    runCustomDataSelfTest,
-    runDiceEngineTest,
-    runDicePanelTest,
-    runDicePrefill,
-    runRenameTest,
-    runTrackerSelfTest,
-} from "./diagnostics";
+import { buildApiDump, buildHealthCheck } from "./diagnostics";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -179,7 +164,7 @@ const ALL_TABS = [...BASE_TABS, "Diagnostics"] as const;
 type TabName = (typeof ALL_TABS)[number];
 const activeTab = ref<TabName>("Core");
 
-// The Diagnostics tab (API probes and tests that write to the server) is for the DM
+// The Diagnostics tab (read-only reports on the sheet and PlanarAlly's mod API) is for the DM
 // only. `isDm` / `isFakePlayer` live on PlanarAlly's game state but aren't in the published types.
 // A DM who has switched to "fake player" (to preview what players see) gets the player view, i.e.
 // no Diagnostics tab either.
@@ -198,34 +183,23 @@ watch(isDm, (dm) => {
     if (!dm && activeTab.value === "Diagnostics") activeTab.value = "Core";
 });
 
-// --- Diagnostics (DIAGNOSTIC BUILD ONLY - see diagnostics.ts) ---------------------------
-// Output accumulates so several probes can be run and then copied out in one go.
+// --- Diagnostics (see diagnostics.ts) ------------------------------------------------------
+// Each report replaces the previous one; Copy puts it on the clipboard for a bug report.
 const diagOutput = ref("");
 const diagBusy = ref(false);
 const diagTextarea = ref<HTMLTextAreaElement>();
 const diagCopyStatus = ref("");
 
-function appendDiag(text: string): void {
-    diagOutput.value += (diagOutput.value ? "\n\n" : "") + text;
-}
-
-async function runDiagAsync(fn: () => Promise<string>): Promise<void> {
+async function runDiag(fn: () => Promise<string>): Promise<void> {
+    if (diagBusy.value) return;
     diagBusy.value = true;
+    diagOutput.value = "";
     try {
-        appendDiag(await fn());
+        diagOutput.value = await fn();
     } catch (e) {
-        appendDiag(`probe failed: ${String(e)}`);
+        diagOutput.value = `Report failed: ${String(e)}`;
     } finally {
         diagBusy.value = false;
-    }
-}
-
-function runDiagSync(fn: () => string | string[]): void {
-    try {
-        const out = fn();
-        appendDiag(Array.isArray(out) ? out.join("\n") : out);
-    } catch (e) {
-        appendDiag(`probe failed: ${String(e)}`);
     }
 }
 
@@ -947,62 +921,30 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Diagnostics' && isDm" class="pf1e-panel">
             <div class="readonly-note">
-                Diagnostic build, round 2. Run the three deep dives and the local tests, then Copy and
-                paste everything back. Tip: add one aura to this token first (so the aura test has a
-                real one to clone), and after the dice prefill press Enter to actually roll before
-                re-running "dice &amp; chat".
+                Both reports are read-only. Copy the output into a bug report.
             </div>
 
-            <div class="diag-group">Read-only probes</div>
             <div class="diag-buttons">
-                <button type="button" :disabled="diagBusy" @click="runDiagSync(() => buildDeepHooks(api))">
-                    Deep dive: hooks &amp; events
+                <button
+                    type="button"
+                    :disabled="diagBusy"
+                    title="Checks the API functions the sheet uses, this token's HP tracker, Custom Data, roll formulas and auras"
+                    @click="runDiag(() => buildHealthCheck(api, currentLocalId, data))"
+                >
+                    Health check
                 </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(() => buildDeepDice(api))">
-                    Deep dive: dice &amp; chat
-                </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagSync(() => buildDeepData(api, currentLocalId))">
-                    Deep dive: data / auras / properties
-                </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(() => buildReport(api, currentLocalId))">
-                    Overview report
-                </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(() => buildBundleScan())">
-                    Scan PA bundles (hooks, kinds, roll flow)
-                </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(() => buildNativeDiceScan())">
-                    Scan: native dice &amp; variables
-                </button>
-            </div>
-
-            <div class="diag-group">Safe tests (local to this browser, clean up after themselves)</div>
-            <div class="diag-buttons">
-                <button type="button" @click="runDiagSync(() => runAllLocalTests(api, currentLocalId))">
-                    Run ALL local tests
-                </button>
-                <button type="button" @click="runDiagSync(() => runTrackerSelfTest(api, currentLocalId, false))">Tracker</button>
-                <button type="button" @click="runDiagSync(() => runCustomDataSelfTest(api, currentLocalId, false))">Custom data</button>
-                <button type="button" @click="runDiagSync(() => runAuraSelfTest(api, currentLocalId))">Aura (clone)</button>
-                <button type="button" @click="runDiagSync(() => runDicePrefill(api, '1d20+5'))">Dice: prefill 1d20+5</button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(async () => (await runDicePanelTest(api)).join('\n'))">
-                    Dice: open 1d20+5 in PA panel
-                </button>
-                <button type="button" :disabled="diagBusy" @click="runDiagAsync(async () => (await runDiceEngineTest(api)).join('\n'))">
-                    Dice: engine roll (+ PA history UI)
-                </button>
-            </div>
-
-            <div class="diag-group">Tests that touch the server or other players</div>
-            <div class="diag-buttons">
-                <button type="button" @click="runDiagSync(() => runTrackerSelfTest(api, currentLocalId, true))">Tracker (synced)</button>
-                <button type="button" @click="runDiagSync(() => runCustomDataSelfTest(api, currentLocalId, true))">Custom data (synced)</button>
-                <button type="button" @click="runDiagSync(() => runRenameTest(api, currentLocalId, data.identity.name))">
-                    Rename token to sheet name
+                <button
+                    type="button"
+                    :disabled="diagBusy"
+                    title="Everything PlanarAlly's mod API exposes, plus a scan of PlanarAlly's code. Large; for when an update breaks something"
+                    @click="runDiag(() => buildApiDump(api, currentLocalId))"
+                >
+                    Full API dump
                 </button>
             </div>
 
             <div class="diag-buttons">
-                <button type="button" @click="copyDiag">Copy</button>
+                <button type="button" :disabled="!diagOutput" @click="copyDiag">Copy</button>
                 <button type="button" @click="diagOutput = ''">Clear</button>
                 <span v-if="diagBusy" class="hp-push-status">working...</span>
                 <span v-if="diagCopyStatus" class="hp-push-status">{{ diagCopyStatus }}</span>
@@ -1097,14 +1039,6 @@ function fmt(n: number): string {
         margin-bottom: 0.5rem;
     }
 
-    .diag-group {
-        font-size: 0.7rem;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        color: #555;
-        margin: 0.4rem 0 0.2rem;
-    }
 
     .diag-buttons {
         display: flex;

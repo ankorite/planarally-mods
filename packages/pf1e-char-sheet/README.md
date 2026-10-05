@@ -31,7 +31,7 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
 - `src/trackers.ts` — HP tracker sync
 - `src/auras.ts` — auras from Hero Lab senses and auras
-- `src/diagnostics.ts` — DM-only Diagnostics tab for inspecting the runtime mod API
+- `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 
 ## Importing from Hero Lab
 
@@ -139,6 +139,17 @@ feet.
 
 - **The sheet tab** only appears on characters the viewer can edit; the DM can always see it.
 - **The Diagnostics tab** is DM-only.
+
+## Diagnostics
+
+The DM-only **Diagnostics** tab has two read-only reports to copy into a bug report:
+
+- **Health check**: checks the sheet on this token. It verifies that every PlanarAlly API function the
+  sheet uses exists, compares the HP tracker, Custom Data and auras with the sheet, resolves every roll
+  formula without rolling it, and lists recent tracker / Custom Data events. Problems are listed at
+  the top.
+- **Full API dump**: everything PlanarAlly's mod API exposes, plus a scan of PlanarAlly's own code
+  for hook and event names. It is large; use it when a PlanarAlly update breaks something.
 
 ## Sheet width
 

@@ -1,114 +1,66 @@
-// DIAGNOSTIC BUILD ONLY - remove (or gut) once the dice / tracker / aura integration paths
-// are understood.
+// The DM-only Diagnostics tab: two read-only reports to copy into a bug report.
 //
-// Why this exists: @planarally/mod-api's published types have repeatedly disagreed with what a
-// live PlanarAlly server actually exposes (trackers.getOrCreate missing, preTrackerUpdate never
-// firing, ...). Rather than trust the types again, this module looks at the REAL runtime
-// objects and produces a plain-text report that can be pasted back for analysis.
+//   * Health check (`buildHealthCheck`): is the sheet working on THIS token? Checks every PlanarAlly
+//     API function the sheet calls, the token's HP tracker, Custom Data and auras against what the
+//     sheet expects, resolves every exported roll formula (without rolling), and lists recent
+//     tracker / Custom Data events.
+//   * API dump (`buildApiDump`): everything PlanarAlly's mod API exposes at runtime, plus a scan of
+//     PlanarAlly's own JS for hook / event names. For when a PlanarAlly update changes the API.
 //
-// Everything here is deliberately defensive: every probe is wrapped in try/catch, nothing
-// invokes getters it doesn't have to, and the only write operations (the tracker self-tests)
-// are opt-in and clean up after themselves. The API is always passed in as `unknown` so type
-// drift in the mod API can't break this file; its only import is our own roll helper.
+// Neither report changes anything: no tracker, aura, Custom Data element or roll is created. The
+// API is handled as `unknown` throughout, so a change in PlanarAlly can't break this file.
 
-import { openInDicePanel, rollFormula } from "./roll";
+import { buildElements, CD_SOURCE } from "./customdata";
+import type { PF1Character } from "./data";
+import { resolveFormula } from "./roll";
+import { isHpTrackerName } from "./trackers";
 
 type Dict = Record<string, unknown>;
 
 export const diagState = {
     meta: undefined as unknown,
-    /** How many times PA looked up each property on our exported `events` object. */
-    eventAccess: new Map<string, number>(),
-    trackerHookCount: 0,
-    trackerHookCalls: [] as string[],
-    /** Events seen on api.eventBus (see installBusListeners). `n` is a monotonic counter. */
-    /** Log every event-bus event to the console too (they are always kept for the report). */
+    /** Log every event-bus event to the console too (they are always kept for the reports). */
     verbose: false,
     busCount: 0,
-    busLog: [] as { n: number; name: string; json: string }[],
+    busLog: [] as { n: number; time: string; name: string; json: string }[],
     notes: [] as string[],
 };
-
-export function noteEventAccess(name: string): void {
-    const key = name.slice(0, 80);
-    diagState.eventAccess.set(key, (diagState.eventAccess.get(key) ?? 0) + 1);
-}
 
 export function note(text: string): void {
     diagState.notes.push(`${new Date().toISOString()} ${text}`);
     if (diagState.notes.length > 100) diagState.notes.shift();
-    console.log(`[pf1e-diag] ${text}`);
+    console.log(`[pf1e-sheet] ${text}`);
 }
 
-export function recordTrackerHook(
-    id: unknown,
-    tracker: unknown,
-    delta: unknown,
-    syncTo: unknown,
-): void {
-    diagState.trackerHookCount++;
-    const t = isObjLike(tracker)
-        ? { uuid: get(tracker, "uuid"), name: get(tracker, "name"), value: get(tracker, "value"), max: get(tracker, "maxvalue") }
-        : tracker;
-    const line = safeStringify({ n: diagState.trackerHookCount, id, tracker: t, delta, syncTo }, 500);
-    diagState.trackerHookCalls.push(line);
-    if (diagState.trackerHookCalls.length > 60) diagState.trackerHookCalls.shift();
-    console.log(`[pf1e-diag] preTrackerUpdate fired ${line}`);
-}
-
-export function recordBus(name: string, args: unknown[]): void {
+function recordBus(name: string, args: unknown[]): void {
     diagState.busCount++;
     const json = safeStringify(args, 400);
-    diagState.busLog.push({ n: diagState.busCount, name, json });
+    diagState.busLog.push({ n: diagState.busCount, time: new Date().toISOString(), name, json });
     if (diagState.busLog.length > 150) diagState.busLog.shift();
-    if (diagState.verbose) console.log(`[pf1e-diag] eventBus "${name}" ${json}`);
+    if (diagState.verbose) console.log(`[pf1e-sheet] eventBus "${name}" ${json}`);
 }
 
-// Round 1 showed PA's own systems emit events on api.eventBus after they change something
-// ("tracker:updated", "customData:added", ...). That is very likely the supported way to get
-// notified of changes made elsewhere, so subscribe to a guessed list of names (read-only, our
-// callback only logs) and see which ones actually fire. "*" is tried too: mitt-style buses
-// call wildcard handlers for every event, which would reveal the real event names for us.
-const GUESSED_BUS_EVENTS = [
-    "*",
+// The events PlanarAlly emits on api.eventBus that matter to the sheet.
+const BUS_EVENTS = [
     "tracker:added", "tracker:updated", "tracker:removed",
     "customData:added", "customData:updated", "customData:removed",
-    "aura:added", "aura:updated", "aura:removed",
-    "shape:added", "shape:updated", "shape:removed",
-    "chat:message", "dice:roll", "dice:rolled",
 ];
 
+/** Keeps a log of tracker / Custom Data events for the reports. Our callbacks only record. */
 export function installBusListeners(api: unknown): void {
     const bus = get(api, "eventBus");
-    if (!isObjLike(bus)) {
-        note("api.eventBus missing - no event listeners installed");
+    const on = get(bus, "on");
+    if (typeof on !== "function") {
+        note("api.eventBus.on missing - no event log");
         return;
     }
-    const methods = collectLevels(bus).flatMap((l) => l.members.filter((m) => m.fn !== undefined).map((m) => m.name));
-    note(`eventBus methods: ${methods.join(", ") || "(none)"}`);
-    const subscribe = ["on", "subscribe", "listen", "addListener", "addEventListener"].find(
-        (n) => typeof bus[n] === "function",
-    );
-    if (subscribe === undefined) {
-        note("eventBus: no obvious subscribe method (on/subscribe/listen/addListener) - listeners not installed");
-        return;
-    }
-    let ok = 0;
-    const failures: string[] = [];
-    for (const name of GUESSED_BUS_EVENTS) {
+    for (const name of BUS_EVENTS) {
         try {
-            (bus[subscribe] as (...a: unknown[]) => unknown).call(bus, name, (...args: unknown[]) =>
-                recordBus(name, args),
-            );
-            ok++;
+            on.call(bus, name, (...args: unknown[]) => recordBus(name, args));
         } catch (e) {
-            failures.push(`${name}: ${String(e)}`);
+            note(`eventBus.on("${name}") failed: ${String(e)}`);
         }
     }
-    note(
-        `eventBus: subscribed to ${ok}/${GUESSED_BUS_EVENTS.length} guessed event names via .${subscribe}()` +
-            (failures.length ? `; failures: ${failures.slice(0, 3).join(" | ")}` : ""),
-    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -349,7 +301,7 @@ function findPaths(root: unknown, re: RegExp, maxDepth = 4, maxResults = 200): s
 }
 
 // ---------------------------------------------------------------------------------------
-// report sections
+// API dump sections
 // ---------------------------------------------------------------------------------------
 
 function jsResourceNames(): string[] {
@@ -430,7 +382,7 @@ const SHAPE_RE = /aura|tracker|custom|dice|roll|chat|branch|variant|label|badge|
 const SHAPE_DATA_RE = /aura|tracker|custom|variant/i;
 
 function sectionShape(api: unknown, shapeId: number | undefined): string[] {
-    const lines = ["## shape probe (the real runtime shape object, not the 3-field IShape type)"];
+    const lines = ["## shape (the runtime shape object)"];
     if (shapeId === undefined) return [...lines, "(no current shape id - open a character first)"];
     const getShape = get(api, "getShape");
     if (typeof getShape !== "function") return [...lines, "api.getShape is not a function"];
@@ -448,30 +400,6 @@ function sectionShape(api: unknown, shapeId: number | undefined): string[] {
     }
     return lines;
 }
-
-function sectionTrackerState(api: unknown): string[] {
-    const lines = ["## trackers state (current)"];
-    const st = get(get(get(api, "systems"), "trackers"), "state");
-    if (!isObjLike(st)) return [...lines, "(trackers.state missing)"];
-    lines.push(`id: ${safeStringify(get(st, "id"))}  parentId: ${safeStringify(get(st, "parentId"))}`);
-    lines.push(`trackers: ${safeStringify(get(st, "trackers"), 1500)}`);
-    lines.push(`parentTrackers: ${safeStringify(get(st, "parentTrackers"), 800)}`);
-    lines.push("(note: state.trackers ends with a temporary:true 'New tracker' placeholder row - not a real tracker)");
-    return lines;
-}
-
-function sectionEvents(): string[] {
-    const lines = ["## events (what PA asked our exported `events` object for)"];
-    const entries = Array.from(diagState.eventAccess.entries()).sort((a, b) => b[1] - a[1]);
-    lines.push(entries.length ? entries.map(([k, v]) => `${k} x${v}`).join(", ") : "(nothing recorded yet)");
-    lines.push(`preTrackerUpdate fired ${diagState.trackerHookCount} time(s). Recent:`);
-    lines.push(...(diagState.trackerHookCalls.length ? diagState.trackerHookCalls.slice(-15) : ["  (none)"]));
-    lines.push(`eventBus events captured: ${diagState.busCount}. Recent:`);
-    lines.push(...(diagState.busLog.length ? diagState.busLog.slice(-15).map((b) => `  #${b.n} ${b.name} ${b.json}`) : ["  (none)"]));
-    if (diagState.notes.length) lines.push("notes:", ...diagState.notes.slice(-20).map((n) => `  ${n}`));
-    return lines;
-}
-
 function sectionChunks(): string[] {
     const names = jsResourceNames();
     const interesting = names.filter((n) => INTEREST.test(n));
@@ -528,86 +456,11 @@ async function fetchText(path: string): Promise<string> {
         return `failed: ${String(e)}`;
     }
 }
-
-// ---------------------------------------------------------------------------------------
-// public entry points
-// ---------------------------------------------------------------------------------------
-
-export async function buildReport(api: unknown, shapeId: number | undefined): Promise<string> {
-    const out: string[] = [`=== PF1E DIAG REPORT ${new Date().toISOString()} (shape ${String(shapeId)}) ===`];
-    const run = (title: string, fn: () => string[]): void => {
-        try {
-            out.push(...fn());
-        } catch (e) {
-            out.push(`## ${title}: SECTION FAILED: ${String(e)}`);
-        }
-        out.push("");
-    };
-
-    run("env", sectionEnv);
-    out.push(`## server version probe\nGET /api/version -> ${await fetchText("/api/version")}`, "");
-    run("top level", () => sectionTopLevel(api));
-    run("systems", () => sectionSystems(api));
-    run("systemsState", () => sectionSystemsState(api));
-    run("interest search", () => [
-        "## names matching dice/roll/chat/aura/tracker/custom/branch/initiative/message/notif/hook/event/variant anywhere in api (depth 4)",
-        ...findPaths(api, INTEREST),
-    ]);
-    run("shape", () => sectionShape(api, shapeId));
-    run("trackers state", () => sectionTrackerState(api));
-    run("events", sectionEvents);
-    run("chunks", sectionChunks);
-    run("window", sectionWindow);
-    run("vue", sectionVueApp);
-    out.push("=== END REPORT ===");
-    return out.join("\n");
-}
-
-/** Short version, logged automatically at game init so there's always something in the console. */
-export function quickSummary(api: unknown): string {
-    const keys = (o: unknown): string => safe(() => Object.getOwnPropertyNames(o as object).join(", "), "?");
-    const systems = get(api, "systems");
-    const lines = [
-        `api keys: ${keys(api)}`,
-        `api.systems keys: ${keys(systems)}`,
-        `api.systemsState keys: ${keys(get(api, "systemsState"))}`,
-        `api.ui keys: ${keys(get(api, "ui"))}  api.ui.shape keys: ${keys(get(get(api, "ui"), "shape"))}`,
-    ];
-    for (const k of safe(() => Object.getOwnPropertyNames(systems as object), [] as string[])) {
-        const names = collectLevels(get(systems, k))
-            .flatMap((l) => l.members.map((m) => m.name))
-            .join(", ");
-        lines.push(`system ${k}: ${names}`);
-    }
-    lines.push(`interesting chunks: ${jsResourceNames().filter((n) => INTEREST.test(n)).join(", ") || "(none)"}`);
-    return lines.join("\n");
-}
-
-// =======================================================================================
-// ROUND 2: deep dives + self-tests written against the REAL runtime API names that round 1
-// revealed (trackers.add/getAll/update/remove, customData.addElement/..., auras.add/...,
-// chat.addMessage, dice.setInput, properties.setName, api.eventBus, api.hooks).
-// =======================================================================================
-
 function callM(obj: unknown, name: string, ...args: unknown[]): unknown {
     if (!isObjLike(obj)) throw new Error(`cannot call ${name} on ${describeValue(obj)}`);
     const f = obj[name];
     if (typeof f !== "function") throw new Error(`${name} is not a function (${describeValue(f)})`);
     return (f as (...a: unknown[]) => unknown).apply(obj, args);
-}
-
-function uuid(): string {
-    try {
-        // randomUUID only exists on secure contexts (https/localhost); a dev server on plain
-        // http://ip:port won't have it, hence the fallback.
-        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-    } catch {
-        /* fall through */
-    }
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-    });
 }
 
 const tail = (v: unknown, n: number): unknown => (Array.isArray(v) ? v.slice(-n) : v);
@@ -618,344 +471,231 @@ const system = (api: unknown, key: string): unknown => get(get(api, "systems"), 
 function timeout(ms: number): Promise<never> {
     return new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms));
 }
+// ---------------------------------------------------------------------------------------
+// health check
+// ---------------------------------------------------------------------------------------
 
-/** Runs one call, records its result, and how many eventBus events / legacy hook calls it caused. */
-function stepper(lines: string[]): (title: string, fn: () => unknown) => void {
-    return (title, fn) => {
-        const hookBefore = diagState.trackerHookCount;
-        const busBefore = diagState.busCount;
-        let result: string;
-        try {
-            result = safeStringify(fn(), 500);
-        } catch (e) {
-            result = `THREW ${String(e)}`;
-        }
-        const bus = diagState.busLog.filter((b) => b.n > busBefore).map((b) => b.name);
-        lines.push(
-            `- ${title}: ${result} | legacy preTrackerUpdate calls: ${diagState.trackerHookCount - hookBefore}` +
-                ` | eventBus events: ${bus.length ? bus.join(", ") : "none"}`,
-        );
-    };
+/** Every API function the sheet calls, by path from `api`. */
+const REQUIRED_API: [path: string, usedFor: string][] = [
+    ["getShape", "tab filter, tracker sync"],
+    ["getGlobalId", "Custom Data, DataBlock"],
+    ["getOrLoadDataBlock", "tracker -> sheet HP"],
+    ["eventBus.on", "tracker -> sheet HP"],
+    ["systems.trackers.getAll", "HP tracker"],
+    ["systems.trackers.get", "HP tracker"],
+    ["systems.trackers.add", "HP tracker"],
+    ["systems.trackers.update", "HP tracker"],
+    ["systems.auras.getAll", "auras"],
+    ["systems.auras.add", "auras"],
+    ["systems.auras.update", "auras"],
+    ["systems.auras.remove", "auras"],
+    ["systems.customData.export", "Custom Data, rolls"],
+    ["systems.customData.addElement", "Custom Data"],
+    ["systems.customData.updateValue", "Custom Data"],
+    ["systems.customData.removeElement", "Custom Data"],
+    ["systems.customData.loadState", "dice panel rolls"],
+    ["systems.customData.dropState", "dice panel rolls"],
+    ["systems.dice.loadSystems", "rolls"],
+    ["systems.dice.getSystem", "quick rolls"],
+    ["systems.dice.setInput", "dice panel rolls"],
+    ["systems.dice.addToHistory", "quick roll result popup"],
+    ["systems.dice.showResults", "quick roll result popup"],
+    ["systems.players.getCurrentPlayer", "quick roll history name"],
+    ["systems.properties.setName", "token rename on import"],
+    ["gameplay.activateTool", "dice panel rolls"],
+];
+
+const ENGINE_FUNCTIONS = ["parse", "roll", "evaluate", "collect"];
+
+function getPath(root: unknown, path: string): unknown {
+    return path.split(".").reduce<unknown>((o, k) => get(o, k), root);
 }
 
-// ---- deep dive: hooks / eventBus / gameplay / modals ------------------------------------
+const pad = (s: string, n: number): string => (s.length >= n ? s : s + " ".repeat(n - s.length));
 
-export function buildDeepHooks(api: unknown): string {
-    const lines = [`=== DEEP DIVE: hooks / eventBus / gameplay / modals ${new Date().toISOString()} ===`];
-    const opts = { sources: true, maxSources: 30, sourceMax: 1200 };
-    const run = (title: string, fn: () => string[]): void => {
-        try {
-            lines.push(...fn());
-        } catch (e) {
-            lines.push(`## ${title}: SECTION FAILED: ${String(e)}`);
-        }
-        lines.push("");
+/**
+ * Read-only check of the sheet on one token. `character` is the sheet's own data for that token.
+ * Problems are marked "!" and repeated in the summary at the top.
+ */
+export async function buildHealthCheck(
+    api: unknown,
+    shapeId: number | undefined,
+    character: PF1Character,
+): Promise<string> {
+    const problems: string[] = [];
+    const body: string[] = [];
+    const ok = (text: string): void => void body.push(`  ${text}`);
+    const bad = (text: string): void => {
+        body.push(`! ${text}`);
+        problems.push(text);
     };
-    run("hooks", () => describeTree("api.hooks", get(api, "hooks"), 2, opts));
-    run("eventBus", () => describeTree("api.eventBus", get(api, "eventBus"), 2, opts));
-    run("gameplay", () => describeTree("api.gameplay", get(api, "gameplay"), 3, opts));
-    run("modals", () => describeTree("api.ui.modals", get(get(api, "ui"), "modals"), 1, opts));
-    run("bus", () => [
-        "## eventBus events captured so far (our listeners were installed at game start)",
-        ...(diagState.busLog.length
-            ? diagState.busLog.slice(-40).map((b) => `  #${b.n} ${b.name} ${b.json}`)
-            : ["  (none - either no events fired yet, or the guessed names/subscribe method were wrong; see notes)"]),
-        ...diagState.notes.slice(-15).map((n) => `  note: ${n}`),
-    ]);
-    return lines.join("\n");
-}
+    const section = (title: string, fn: () => void | Promise<void>): Promise<void> =>
+        Promise.resolve()
+            .then(() => {
+                body.push("", `## ${title}`);
+                return fn();
+            })
+            .catch((e: unknown) => bad(`${title}: check failed: ${String(e)}`));
 
-// ---- deep dive: dice / chat / room ---------------------------------------------------------
+    await section("Environment", async () => {
+        ok(`mod: ${String(get(diagState.meta, "name") ?? "?")} v${String(get(diagState.meta, "version") ?? "?")}`);
+        ok(`PlanarAlly: GET /api/version -> ${await fetchText("/api/version")}`);
+        ok(`browser: ${navigator.userAgent}`);
+        ok(`secure context: ${String(window.isSecureContext)} (copy-to-clipboard needs true)`);
+        const game = get(sstate(api, "game"), "reactive");
+        ok(`DM: ${String(get(game, "isDm"))}, fake player: ${String(get(game, "isFakePlayer"))}`);
+        if (get(sraw(api, "room"), "enableDice") === false) bad("dice are disabled in this room");
+        else ok("dice enabled in this room");
+    });
 
-export async function buildDeepDice(api: unknown): Promise<string> {
-    const lines = [`=== DEEP DIVE: dice / chat / room ${new Date().toISOString()} ===`];
-    const dice = system(api, "dice");
+    let engine: unknown;
+    await section("PlanarAlly API functions the sheet uses", async () => {
+        for (const [path, usedFor] of REQUIRED_API) {
+            const present = typeof getPath(api, path) === "function";
+            if (present) ok(`${pad("OK", 8)}${pad(path, 36)}${usedFor}`);
+            else bad(`${pad("MISSING", 8)}${pad(path, 36)}${usedFor}`);
+        }
+        const dice = system(api, "dice");
+        try {
+            await Promise.race([Promise.resolve(callM(dice, "loadSystems")), timeout(8000)]);
+            engine = callM(dice, "getSystem", "2d");
+        } catch (e) {
+            bad(`2d dice engine not available: ${String(e)}`);
+            return;
+        }
+        const missing = ENGINE_FUNCTIONS.filter((f) => typeof get(engine, f) !== "function");
+        if (missing.length) bad(`2d dice engine is missing ${missing.join(", ")}`);
+        else ok(`2d dice engine: ${ENGINE_FUNCTIONS.join(", ")} present`);
+    });
 
-    try {
-        await Promise.race([Promise.resolve(callM(dice, "loadSystems")), timeout(8000)]);
-        lines.push("dice.loadSystems(): completed");
-    } catch (e) {
-        lines.push(`dice.loadSystems(): ${String(e)}`);
+    if (shapeId === undefined) {
+        bad("no token - open the sheet on a character token and run the check again");
+        return finish(problems, body);
     }
-    lines.push(`dice.isLoaded: ${safeStringify(get(dice, "isLoaded"))}`);
-    for (const key of ["2d", "3d"]) {
-        const sys = safe(() => callM(dice, "getSystem", key), undefined);
-        lines.push(
-            ...describeObject(`dice.getSystem("${key}")`, sys, { sources: true, maxSources: 30, sourceMax: 1000 }),
-        );
-    }
 
-    const raw = sraw(api, "dice");
-    lines.push(
-        `systemsState.dice.raw: ${safeStringify(
-            {
-                uiState: get(raw, "uiState"),
-                textInput: get(raw, "textInput"),
-                lastCursorPosition: get(raw, "lastCursorPosition"),
-                dimensions3d: get(raw, "dimensions3d"),
-            },
-            500,
-        )}`,
-    );
-    const history = get(raw, "history");
-    lines.push(
-        `dice history (${Array.isArray(history) ? history.length : "?"} entries, last 3): ${safeStringify(tail(history, 3), 2000)}`,
-    );
-    lines.push(`dice result: ${safeStringify(get(raw, "result"), 1500)}`);
-
-    const messages = get(sraw(api, "chat"), "messages");
-    lines.push(
-        `chat messages (${Array.isArray(messages) ? messages.length : "?"}, last 5): ${safeStringify(tail(messages, 5), 2000)}`,
-    );
-    lines.push(`room flags: ${safeStringify(sraw(api, "room"), 300)}`);
-
-    lines.push(...describeObject("api.systems.chat (sources)", system(api, "chat"), { sources: true, sourceMax: 1000 }));
-    lines.push(...describeObject("api.systems.room (sources)", system(api, "room"), { sources: true, sourceMax: 1000 }));
-    lines.push(
-        "",
-        "TIP: run 'Dice: prefill 1d20+5' (or roll normally in PA), roll it, then run this deep dive again -",
-        "the history/result/chat-message lines above then show exactly what a real roll looks like.",
-    );
-    return lines.join("\n");
-}
-
-// ---- deep dive: customData / auras / properties / variants + per-shape data -----------------
-
-export function buildDeepData(api: unknown, shapeId: number | undefined): string {
-    const lines = [`=== DEEP DIVE: customData / auras / properties / variants ${new Date().toISOString()} (shape ${String(shapeId)}) ===`];
-    const run = (title: string, fn: () => string[]): void => {
-        try {
-            lines.push(...fn());
-        } catch (e) {
-            lines.push(`## ${title}: SECTION FAILED: ${String(e)}`);
-        }
-        lines.push("");
-    };
-    run("customData src", () =>
-        describeObject("api.systems.customData (long sources)", system(api, "customData"), {
-            sources: true, maxSources: 25, sourceMax: 1800,
-        }),
-    );
-    run("auras src", () =>
-        describeObject("api.systems.auras (long sources)", system(api, "auras"), {
-            sources: /^(add|update|remove|getAll|get|fromServerShape|toServerShape)$/, maxSources: 20, sourceMax: 1800,
-        }),
-    );
-    run("properties src", () =>
-        describeObject("api.systems.properties (rename-related sources)", system(api, "properties"), {
-            sources: /^(setName|setNameVisible|setShowBadge|setIsDefeated|loadState|dropState)$/, maxSources: 12, sourceMax: 1200,
-        }),
-    );
-    run("variants src", () =>
-        describeObject("api.systems.variants (sources)", system(api, "variants"), {
-            sources: /^(createOrGet|create|add|load|update|store)$/, maxSources: 10, sourceMax: 800,
-        }),
-    );
-    run("shape data", () => {
-        if (shapeId === undefined) return ["(no current shape id - open a character first)"];
-        const out = [`## data for shape ${shapeId}`];
-        out.push(`global id: ${safeStringify(safe(() => callM(api, "getGlobalId", shapeId), undefined))}`);
-        const cd = safe(() => callM(system(api, "customData"), "export", shapeId) as unknown[], [] as unknown[]);
-        out.push(`customData.export(): ${cd.length} element(s): ${safeStringify(cd, 3000)}`);
-        const auras = safe(() => callM(system(api, "auras"), "getAll", shapeId) as unknown[], [] as unknown[]);
-        out.push(`auras.getAll(): ${auras.length} aura(s): ${safeStringify(auras, 2500)}`);
-        const trackers = safe(() => callM(system(api, "trackers"), "getAll", shapeId) as unknown[], [] as unknown[]);
-        out.push(`trackers.getAll(): ${trackers.length} tracker(s): ${safeStringify(trackers, 1500)}`);
-        const variants = safe(() => callM(system(api, "variants"), "export", shapeId), undefined);
-        out.push(`variants.export(): ${safeStringify(variants, 800)}`);
-        const propData = safe(
+    await section("Token", () => {
+        ok(`local id: ${shapeId}, global id: ${safeStringify(safe(() => callM(api, "getGlobalId", shapeId), undefined))}`);
+        const props = safe(
             () => ((get(sstate(api, "properties"), "readonly") as Dict)["data"] as Map<number, unknown>).get(shapeId),
             undefined,
         );
-        out.push(`properties (readonly state) for shape: ${safeStringify(propData, 600)}`);
-        return out;
+        ok(`token name: ${safeStringify(get(props, "name"))}`);
+        const shape = safe(() => callM(api, "getShape", shapeId), undefined);
+        if (get(shape, "character") === undefined) bad("token is not marked as a character");
+        else ok(`character id: ${safeStringify(get(shape, "character"))}`);
     });
-    return lines.join("\n");
-}
 
-// ---- self-tests -----------------------------------------------------------------------------
-
-const TEST_SOURCE = "pf1e-diag";
-
-/** Tracker add -> getAll -> update -> remove on a throwaway tracker. */
-export function runTrackerSelfTest(api: unknown, shapeId: number | undefined, serverSync: boolean): string[] {
-    const lines = [`=== TRACKER SELF-TEST (${serverSync ? "SERVER-SYNCED" : "local only"}) ${new Date().toISOString()} ===`];
-    const trackers = system(api, "trackers");
-    if (!isObjLike(trackers)) return [...lines, "api.systems.trackers missing"];
-    if (shapeId === undefined) return [...lines, "no current shape id"];
-    const sync = { ui: true, server: serverSync };
-    const step = stepper(lines);
-    const id = uuid();
-    const mine = (): string =>
-        safeStringify(
-            (safe(() => callM(trackers, "getAll", shapeId) as unknown[], [] as unknown[])).filter((t) => get(t, "uuid") === id),
-            400,
+    await section("Sheet data", () => {
+        const c = character;
+        if (!c.identity.name) bad("no character imported on this token");
+        ok(`name: ${c.identity.name || "(none)"}`);
+        ok(`classes: ${c.classes.map((k) => `${k.name} ${k.level}`).join(", ") || "(none)"}`);
+        ok(`imported: ${c.importedAt ?? "(never)"}`);
+        ok(
+            `counts: ${c.skills.length} skills, ${c.combat.attacks.length} attacks, ${c.feats.length} feats, ` +
+                `${c.spellcasting.reduce((n, s) => n + s.spells.length, 0)} spells, ${c.specials?.length ?? 0} specials, ` +
+                `${c.inventory.length} items, ${c.auras?.length ?? 0} auras`,
         );
+        ok(`DataBlock size: ${(JSON.stringify(c).length / 1024).toFixed(1)} KB`);
+        for (const a of c.combat.attacks) ok(`attack: ${a.name} ${a.bonus} dmg ${a.damage} crit ${a.critical}`);
+    });
 
-    step("add", () =>
-        callM(trackers, "add", shapeId, {
-            uuid: id, name: "PF1E-DIAG", value: 5, maxvalue: 10, visible: true, draw: true,
-            primaryColor: "#ff00ff", secondaryColor: "#00ffff",
-        }, sync),
-    );
-    lines.push(`  getAll() now: ${mine()}`);
-    step("get", () => callM(trackers, "get", shapeId, id));
-    step("update value=7", () => callM(trackers, "update", shapeId, id, { value: 7 }, sync));
-    lines.push(`  getAll() now: ${mine()}`);
-    step("update maxvalue=12,name=PF1E-DIAG2", () =>
-        callM(trackers, "update", shapeId, id, { maxvalue: 12, name: "PF1E-DIAG2" }, sync),
-    );
-    lines.push(`  getAll() now: ${mine()}`);
-    step("remove", () => callM(trackers, "remove", shapeId, id, sync));
-    lines.push(`  getAll() now: ${mine()}`);
-    return lines;
-}
-
-/** Custom Data: addElement -> getElementId -> updateValue -> removeElement, under our own `source`. */
-export function runCustomDataSelfTest(api: unknown, shapeId: number | undefined, serverSync: boolean): string[] {
-    const lines = [`=== CUSTOM DATA SELF-TEST (${serverSync ? "SERVER-SYNCED" : "local only"}) ${new Date().toISOString()} ===`];
-    const cd = system(api, "customData");
-    if (!isObjLike(cd)) return [...lines, "api.systems.customData missing"];
-    if (shapeId === undefined) return [...lines, "no current shape id"];
-    const step = stepper(lines);
-    const gid = safe(() => callM(api, "getGlobalId", shapeId), undefined);
-    lines.push(`global id of shape: ${safeStringify(gid)}`);
-    const ident = { shapeId: gid, source: TEST_SOURCE, prefix: "diag", name: "test_number" };
-    const mine = (): string =>
-        safeStringify(
-            (safe(() => callM(cd, "export", shapeId) as unknown[], [] as unknown[])).filter((e) => get(e, "source") === TEST_SOURCE),
-            600,
-        );
-
-    step("addElement", () =>
-        callM(cd, "addElement", { ...ident, kind: "number", value: 5, reference: null, description: "pf1e diagnostic" }, serverSync),
-    );
-    lines.push(`  export() now: ${mine()}`);
-    const elementId = safe(() => callM(cd, "getElementId", ident), undefined);
-    lines.push(`  getElementId -> ${safeStringify(elementId)}`);
-    step("updateValue 5 -> 9", () => callM(cd, "updateValue", shapeId, elementId, 9, serverSync));
-    lines.push(`  export() now: ${mine()}`);
-    step("removeElement", () => callM(cd, "removeElement", shapeId, elementId, serverSync));
-    lines.push(`  export() now: ${mine()}`);
-    return lines;
-}
-
-/**
- * Auras: clones an EXISTING aura on the shape (so the record has exactly the right fields, which
- * we haven't seen yet), made inactive/invisible so it can't change lighting or vision, local only.
- */
-export function runAuraSelfTest(api: unknown, shapeId: number | undefined): string[] {
-    const lines = [`=== AURA SELF-TEST (local only, clone of an existing aura) ${new Date().toISOString()} ===`];
-    const auras = system(api, "auras");
-    if (!isObjLike(auras)) return [...lines, "api.systems.auras missing"];
-    if (shapeId === undefined) return [...lines, "no current shape id"];
-    const existing = safe(() => callM(auras, "getAll", shapeId) as unknown[], [] as unknown[]).filter(isObjLike);
-    if (!existing.length) {
-        return [...lines, "This shape has no aura. Add one via PlanarAlly's Auras UI first (any aura), then re-run - cloning a real one guarantees the right fields."];
-    }
-    const step = stepper(lines);
-    const clone = JSON.parse(JSON.stringify(existing[0])) as Dict;
-    const id = uuid();
-    clone["uuid"] = id;
-    if (typeof clone["name"] === "string") clone["name"] = `${clone["name"]}-diag`;
-    for (const k of ["active", "visionSource", "visible"]) if (k in clone) clone[k] = false;
-    const sync = { ui: true, server: false };
-    const mine = (): string =>
-        safeStringify(
-            (safe(() => callM(auras, "getAll", shapeId) as unknown[], [] as unknown[])).filter((a) => get(a, "uuid") === id),
-            600,
-        );
-
-    lines.push(`template aura fields: ${Object.keys(clone).join(", ")}`);
-    step("add (clone)", () => callM(auras, "add", shapeId, clone, sync));
-    lines.push(`  getAll() now: ${mine()}`);
-    if (typeof clone["value"] === "number") {
-        step(`update value ${clone["value"]} -> ${clone["value"] + 1}`, () =>
-            callM(auras, "update", shapeId, id, { value: (clone["value"] as number) + 1 }, sync),
-        );
-        lines.push(`  getAll() now: ${mine()}`);
-    }
-    step("remove", () => callM(auras, "remove", shapeId, id, sync));
-    lines.push(`  getAll() now: ${mine()}`);
-    return lines;
-}
-
-/** Dice: pre-fills PA's roll box. You then press Enter yourself; re-run the dice deep dive after. */
-export function runDicePrefill(api: unknown, text = "1d20+5"): string[] {
-    const lines = [`=== DICE PREFILL ${new Date().toISOString()} ===`];
-    const dice = system(api, "dice");
-    if (!isObjLike(dice)) return [...lines, "api.systems.dice missing"];
-    const step = stepper(lines);
-    const stateNow = (): string =>
-        safeStringify({ uiState: get(sraw(api, "dice"), "uiState"), textInput: get(sraw(api, "dice"), "textInput") }, 300);
-    lines.push(`state before: ${stateNow()}`);
-    step(`setInput(${JSON.stringify(text)})`, () => callM(dice, "setInput", text));
-    lines.push(`state after: ${stateNow()}`);
-    lines.push("If a roll prompt appeared, press Enter to roll it, then run 'Deep dive: dice & chat' to capture the real roll data.");
-    return lines;
-}
-
-/** Shape rename via the real setter. This genuinely renames the token - that is the point. */
-export function runRenameTest(api: unknown, shapeId: number | undefined, newName: string): string[] {
-    const lines = [`=== RENAME TEST (changes the real shape name) ${new Date().toISOString()} ===`];
-    const props = system(api, "properties");
-    if (!isObjLike(props)) return [...lines, "api.systems.properties missing"];
-    if (shapeId === undefined) return [...lines, "no current shape id"];
-    if (!newName) return [...lines, "sheet has no character name to rename to (import a character first)"];
-    const step = stepper(lines);
-    const nameNow = (): string =>
-        safeStringify(
-            safe(() => ((get(sstate(api, "properties"), "readonly") as Dict)["data"] as Map<number, unknown>).get(shapeId), undefined),
-            300,
-        );
-    for (const lvl of collectLevels(props)) {
-        const m = lvl.members.find((x) => x.name === "setName");
-        if (m?.fn) {
-            lines.push(`setName source: ${sourceOf(m.fn, 1200)}`);
-            break;
+    await section("HP tracker", () => {
+        const all = safe(() => callM(system(api, "trackers"), "getAll", shapeId) as unknown[], [] as unknown[]);
+        const real = all.filter((t) => get(t, "temporary") !== true);
+        const hp = real.filter((t) => isHpTrackerName(get(t, "name")));
+        const { current, max } = character.combat.hp;
+        ok(`sheet HP: ${current} / ${max}`);
+        ok(`trackers on token: ${real.map((t) => `${String(get(t, "name"))} ${String(get(t, "value"))}/${String(get(t, "maxvalue"))}`).join(", ") || "(none)"}`);
+        if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Core tab');
+        else if (hp.length > 1) bad(`${hp.length} trackers named "HP" - only the first is synced`);
+        const first = hp[0];
+        if (first !== undefined && get(first, "value") !== current) {
+            bad(`HP tracker shows ${String(get(first, "value"))} but the sheet has ${current}`);
         }
-    }
-    lines.push(`state before: ${nameNow()}`);
-    step(`setName(${shapeId}, ${JSON.stringify(newName)}, {ui,server})`, () =>
-        callM(props, "setName", shapeId, newName, { ui: true, server: true }),
-    );
-    lines.push(`state after: ${nameNow()}`);
-    lines.push("Check the Properties tab and the on-map label, then reload the page to confirm it persisted.");
-    return lines;
+    });
+
+    await section("Custom Data", () => {
+        const exported = safe(() => callM(system(api, "customData"), "export", shapeId) as unknown[], [] as unknown[]);
+        const mine = exported.filter((e) => get(e, "source") === CD_SOURCE && get(e, "pending") === undefined);
+        const others = exported.filter((e) => get(e, "source") !== CD_SOURCE && get(e, "pending") === undefined);
+        const expected = buildElements(character);
+        const k = (prefix: unknown, name: unknown): string => `${String(prefix).toLowerCase()}|${String(name).toLowerCase()}`;
+        const have = new Map(mine.map((e) => [k(get(e, "prefix"), get(e, "name")), e]));
+        const missing: string[] = [];
+        const outdated: string[] = [];
+        for (const want of expected) {
+            const key = k(want.prefix, want.name);
+            const cur = have.get(key);
+            have.delete(key);
+            if (!cur) missing.push(`${want.prefix}/${want.name}`);
+            else if (get(cur, "kind") !== want.kind || get(cur, "value") !== want.value) {
+                outdated.push(`${want.prefix}/${want.name} (token ${safeStringify(get(cur, "value"))}, sheet ${safeStringify(want.value)})`);
+            }
+        }
+        ok(`sheet exports ${expected.length} elements; token has ${mine.length} from the sheet, ${others.length} from elsewhere`);
+        if (missing.length) bad(`${missing.length} missing (use "Export to Custom Data"): ${missing.slice(0, 20).join(", ")}${missing.length > 20 ? ", ..." : ""}`);
+        if (outdated.length) bad(`${outdated.length} differ from the sheet: ${outdated.slice(0, 20).join("; ")}${outdated.length > 20 ? "; ..." : ""}`);
+        if (have.size) ok(`${have.size} left over from an older export (removed on next export): ${Array.from(have.values()).map((e) => String(get(e, "name"))).join(", ")}`);
+        if (!missing.length && !outdated.length) ok("all sheet elements present and up to date");
+    });
+
+    await section("Roll formulas (resolved, not rolled)", () => {
+        const rolls = buildElements(character).filter((e) => e.prefix === "/rolls" || e.kind === "dice-expression");
+        let good = 0;
+        for (const r of rolls) {
+            try {
+                const resolved = resolveFormula(api, shapeId, `{${r.name}}`);
+                const parsed = engine === undefined ? [] : (callM(engine, "parse", resolved) as unknown[]);
+                if (engine !== undefined && (!Array.isArray(parsed) || parsed.length === 0)) {
+                    bad(`${r.name}: "${resolved}" is not a valid dice formula`);
+                } else good++;
+            } catch (e) {
+                bad(`${r.name}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+        ok(`${good} of ${rolls.length} formulas resolve${engine === undefined ? "" : " and parse"}`);
+    });
+
+    await section("Auras", () => {
+        const live = safe(() => callM(system(api, "auras"), "getAll", shapeId) as unknown[], [] as unknown[]).filter(
+            (a) => get(a, "temporary") !== true,
+        );
+        ok(
+            `on token: ${live.map((a) => `${String(get(a, "name"))} ${String(get(a, "value"))} ft${get(a, "visionSource") === true ? " (vision)" : ""}${get(a, "active") === false ? " (off)" : ""}`).join(", ") || "(none)"}`,
+        );
+        for (const a of character.auras ?? []) {
+            const onToken = a.uuid !== "" && live.some((x) => get(x, "uuid") === a.uuid);
+            if (onToken) ok(`sheet aura ${a.name} ${a.radius} ft: on token`);
+            else bad(`sheet aura ${a.name} ${a.radius} ft is not on the token - use "Create / update auras on the token"`);
+        }
+        if (!(character.auras ?? []).length) ok("the sheet has no auras for this character");
+    });
+
+    await section("Recent tracker / Custom Data events", () => {
+        const recent = diagState.busLog.slice(-15);
+        if (!recent.length) ok("(none since the page loaded)");
+        for (const b of recent) ok(`${b.time} ${b.name} ${b.json}`);
+        for (const n of diagState.notes.slice(-10)) ok(`note: ${n}`);
+    });
+
+    return finish(problems, body);
 }
 
-/** Every local-only test in one go (tracker, custom data, aura if present, chat). */
-export function runAllLocalTests(api: unknown, shapeId: number | undefined): string[] {
+function finish(problems: string[], body: string[]): string {
     return [
-        ...runTrackerSelfTest(api, shapeId, false), "",
-        ...runCustomDataSelfTest(api, shapeId, false), "",
-        ...runAuraSelfTest(api, shapeId),
-    ];
+        `=== PF1E SHEET HEALTH CHECK ${new Date().toISOString()} ===`,
+        problems.length ? `${problems.length} problem(s):` : "No problems found.",
+        ...problems.map((p) => `  - ${p}`),
+        ...body,
+        "",
+        "=== END ===",
+    ].join("\n");
 }
 
-// ---- ROUND 3: dice engine test + PA bundle scanner ------------------------------------------
-
-/** Rolls 1d20+5 through the real engine, pushing into PA's own history/results UI as well. */
-export async function runDiceEngineTest(api: unknown): Promise<string[]> {
-    const lines = [`=== DICE ENGINE TEST (local; also pushes to PA's native history/results) ${new Date().toISOString()} ===`];
-    try {
-        const out = await rollFormula(api, "1d20+5", { label: "PF1E-DIAG roll", useNativeUi: true });
-        lines.push(`total ${out.total}, breakdown "${out.breakdown}"`);
-        lines.push(`engine's collected roll object: ${safeStringify(out.roll, 1600)}`);
-        lines.push(`notes: ${out.notes.length ? out.notes.join(" | ") : "(none - addToHistory and showResults did not throw)"}`);
-    } catch (e) {
-        lines.push(`FAILED: ${String(e)}`);
-    }
-    const raw = sraw(api, "dice");
-    const history = get(raw, "history");
-    lines.push(
-        `PA dice state after: ${safeStringify({ uiState: get(raw, "uiState"), textInput: get(raw, "textInput") }, 300)}`,
-        `PA history (${Array.isArray(history) ? history.length : "?"}, last 2): ${safeStringify(tail(history, 2), 1400)}`,
-        `PA result: ${safeStringify(get(raw, "result"), 900)}`,
-        "Did a results popup / history entry appear in PA's dice panel? Say so when you paste this.",
-    );
-    return lines;
-}
+// ---------------------------------------------------------------------------------------
+// API dump
+// ---------------------------------------------------------------------------------------
 
 // Chunks worth reading. Babylon/shader files are skipped: they're large and irrelevant.
 const SCAN_ALLOW = /^(Game|dice|DiceFormat|ToggleFormat|dx|index|state|socket|utils|http|types|tools|movement)-/;
@@ -1013,24 +753,31 @@ const BUS_NAME_RE = /\.(pipe|tap|emit|on|once)\((?:`|"|')([A-Za-z0-9_.\-/]+:[A-Z
 // Socket (wire protocol) names look like "Shape.Options.Tracker.Update".
 const WIRE_NAME_RE = /(?:`|"|')([A-Z][A-Za-z0-9]*(?:\.[A-Z][A-Za-z0-9]*){1,6})(?:`|"|')/g;
 const WIRE_INTEREST = /dice|roll|chat|aura|tracker|custom|propert|message/i;
-const ANCHORS = [".addToHistory(", ".showResults(", ".getSystem(", ".loadSystems(", ".setInput(", ".addMessage("];
+// Searched for in PlanarAlly's JS: how its own code calls the parts of the API the sheet relies on.
+const NEEDLES: [needle: string, radius: number, max: number][] = [
+    [".addToHistory(", 250, 3],
+    [".showResults(", 250, 3],
+    [".getSystem(", 250, 3],
+    [".setInput(", 250, 3],
+    ["isVariable", 350, 3],
+    ["shareWith", 300, 3],
+    ["dice-expression", 200, 3],
+    ["defaultValue", 150, 4],
+];
 
 /**
- * Reads the JS PA itself served (read-only, same origin) and extracts what the API can't tell us:
- * the full list of hook and event names, the custom-data element kinds (their defaultValue
- * table), how PA's own dice UI calls the engine and chat, and how dice code touches custom data.
+ * Reads the JS PlanarAlly itself served (read-only, same origin) for what the API objects can't
+ * show: every hook and event name, socket message names, and how PlanarAlly's own code calls the
+ * dice / Custom Data functions the sheet uses.
  */
-export async function buildBundleScan(): Promise<string> {
-    const lines = [`=== PA BUNDLE SCAN ${new Date().toISOString()} ===`];
+async function bundleScan(): Promise<string[]> {
+    const lines = ["## PlanarAlly bundle scan"];
     const urls = viteChunkUrls();
-    lines.push(`scanning ${urls.length} chunk(s): ${urls.map((u) => u.split("/").pop() ?? u).join(", ")}`);
+    lines.push(`scanning ${urls.length} chunk(s)`);
 
     const bus = new Map<string, Set<string>>(); // event/hook name -> methods used with it
     const wire = new Set<string>();
-    const kinds: string[] = [];
-    const anchorHits = new Map<string, string[]>();
-    const customInDice: string[] = [];
-    const referenceHits: string[] = [];
+    const hits = new Map<string, string[]>();
 
     for (const url of urls) {
         const file = url.split("/").pop() ?? url;
@@ -1042,152 +789,123 @@ export async function buildBundleScan(): Promise<string> {
             continue;
         }
         lines.push(`  ${file}: ${(text.length / 1024).toFixed(0)} KB`);
-        try {
-            for (const m of text.matchAll(BUS_NAME_RE)) {
-                const name = m[2] ?? "";
-                if (!name) continue;
-                if (!bus.has(name)) bus.set(name, new Set());
-                bus.get(name)?.add(m[1] ?? "?");
-            }
-            for (const m of text.matchAll(WIRE_NAME_RE)) {
-                if (m[1] && WIRE_INTEREST.test(m[1])) wire.add(m[1]);
-            }
-            for (const sn of snippets(text, "defaultValue", 150, 6)) kinds.push(`[${file}] ${sn}`);
-            for (const a of ANCHORS) {
-                const hits = anchorHits.get(a) ?? [];
-                for (const sn of snippets(text, a, 320, 3)) if (hits.length < 4) hits.push(`[${file}] ${sn}`);
-                anchorHits.set(a, hits);
-            }
-            if (file.startsWith("dice-")) {
-                customInDice.push(...snippets(text, "customData", 220, 6).map((sn) => `[${file}] ${sn}`));
-            }
-            referenceHits.push(...snippets(text, ".reference", 160, 3).map((sn) => `[${file}] ${sn}`));
-        } catch (e) {
-            lines.push(`  ${file}: ANALYSIS FAILED ${String(e)}`);
+        for (const m of text.matchAll(BUS_NAME_RE)) {
+            const name = m[2] ?? "";
+            if (!name) continue;
+            if (!bus.has(name)) bus.set(name, new Set());
+            bus.get(name)?.add(m[1] ?? "?");
+        }
+        for (const m of text.matchAll(WIRE_NAME_RE)) {
+            if (m[1] && WIRE_INTEREST.test(m[1])) wire.add(m[1]);
+        }
+        for (const [needle, radius, max] of NEEDLES) {
+            const arr = hits.get(needle) ?? [];
+            for (const sn of snippets(text, needle, radius, max)) if (arr.length < max) arr.push(`[${file}] ${sn}`);
+            hits.set(needle, arr);
         }
     }
 
-    const byMethod = (m: string): string =>
+    const byMethod = (...methods: string[]): string =>
         Array.from(bus.entries())
-            .filter(([, methods]) => methods.has(m))
+            .filter(([, used]) => methods.some((m) => used.has(m)))
             .map(([name]) => name)
             .sort()
             .join(", ") || "(none)";
     lines.push(
         "",
-        "## hook names (.pipe/.tap - mods can register handlers with api.hooks.tap(name, fn))",
-        `pipe: ${byMethod("pipe")}`,
-        `tap: ${byMethod("tap")}`,
-        "",
-        "## event names (.emit - mods can listen with api.eventBus.on(name, fn))",
-        `emit: ${byMethod("emit")}`,
-        `on/once: ${byMethod("on")} | ${byMethod("once")}`,
-        "",
-        `## wire-protocol-looking names matching dice/roll/chat/aura/tracker/custom/propert/message (${wire.size})`,
-        Array.from(wire).sort().join(", ") || "(none)",
-        "",
-        "## defaultValue contexts (the custom-data element kinds table lives around here)",
-        ...(kinds.length ? kinds.slice(0, 10) : ["(none found)"]),
-        "",
-        "## how PA's own code calls the dice/chat API",
+        `hooks (pipe/tap - api.hooks): ${byMethod("pipe", "tap")}`,
+        `events (emit - api.eventBus.on): ${byMethod("emit")}`,
+        `socket names (dice/roll/chat/aura/tracker/custom/propert/message): ${Array.from(wire).sort().join(", ") || "(none)"}`,
     );
-    for (const a of ANCHORS) {
-        lines.push(`### ${a}`, ...((anchorHits.get(a) ?? []).length ? (anchorHits.get(a) ?? []) : ["(no hits)"]));
+    for (const [needle] of NEEDLES) {
+        const arr = hits.get(needle) ?? [];
+        lines.push("", `### ${needle}`, ...(arr.length ? arr : ["(no hits)"]));
     }
-    lines.push(
-        "",
-        "## customData mentions inside the dice chunk (does dice use custom data?)",
-        ...(customInDice.length ? customInDice : ["(none)"]),
-        "",
-        "## .reference usages (what a custom-data element's `reference` points at)",
-        ...(referenceHits.length ? referenceHits.slice(0, 8) : ["(none)"]),
-    );
-    return lines.join("\n");
-}
-
-/** Opens 1d20+5 in PA's own dice panel (the "PA dice panel" roll mode). */
-export async function runDicePanelTest(api: unknown): Promise<string[]> {
-    const lines = [`=== DICE PANEL TEST ${new Date().toISOString()} ===`];
-    const stateNow = (): string =>
-        safeStringify({ uiState: get(sraw(api, "dice"), "uiState"), textInput: get(sraw(api, "dice"), "textInput") }, 300);
-    lines.push(`PA dice state before: ${stateNow()}`);
-    try {
-        await openInDicePanel(api, "1d20+5");
-        lines.push("openInDicePanel completed without error (loadSystems -> activateTool(\"Dice\") -> setInput)");
-    } catch (e) {
-        lines.push(`FAILED: ${String(e)}`);
-    }
-    lines.push(
-        `PA dice state after: ${stateNow()}`,
-        "Did PA's dice panel open with 1d20+5 in it? If the formula is there but no panel appeared, the tool name string is wrong.",
-        "Press Enter in the panel to roll, then check a second account for the toast notification.",
-    );
     return lines;
 }
 
+const SOURCE_SYSTEMS = /^(trackers|auras|customData|dice|properties|players)$/;
+
 /**
- * Focused follow-up scan: how PA's native roll is shared, the dice-expression variable syntax
- * (how an expression references other Custom Data elements), and the tool-name enum behind
- * api.gameplay.activateTool. Also dumps the small dice-related chunks whole.
+ * Everything the mod API exposes at runtime: members of `api`, every system and its state, the
+ * source of the functions the sheet relies on, the current token's raw data, and a scan of
+ * PlanarAlly's JS. Large; meant to be pasted whole when a PlanarAlly update breaks something.
  */
-export async function buildNativeDiceScan(): Promise<string> {
-    const lines = [`=== NATIVE DICE / VARIABLE SCAN ${new Date().toISOString()} ===`];
-    const urls = viteChunkUrls();
-    lines.push(`scanning ${urls.length} chunk(s): ${urls.map((u) => u.split("/").pop() ?? u).join(", ")}`);
-
-    // needle, radius, max hits overall
-    const NEEDLES: [string, number, number][] = [
-        ["isVariable", 450, 4],
-        ["discriminator", 350, 3],
-        ["shareWith", 380, 4],
-        ["Dice.Roll", 260, 4],
-        ["dice-expression", 260, 4],
-        ["Dice=", 140, 4],
-        ["Dice:`", 140, 4],
-        ["selectTool", 260, 3],
-    ];
-    const hits = new Map<string, string[]>();
-    const whole: string[] = [];
-
-    for (const url of urls) {
-        const file = url.split("/").pop() ?? url;
-        let text: string;
+export async function buildApiDump(api: unknown, shapeId: number | undefined): Promise<string> {
+    const out: string[] = [`=== PF1E API DUMP ${new Date().toISOString()} (token ${String(shapeId)}) ===`];
+    const run = async (title: string, fn: () => string[] | Promise<string[]>): Promise<void> => {
         try {
-            text = await fetchChunk(url);
+            out.push(...(await fn()));
         } catch (e) {
-            lines.push(`  ${file}: FETCH FAILED ${String(e)}`);
-            continue;
+            out.push(`## ${title}: SECTION FAILED: ${String(e)}`);
         }
-        lines.push(`  ${file}: ${(text.length / 1024).toFixed(0)} KB`);
-        try {
-            if (/^(DiceFormat|ToggleFormat|dice)-/.test(file)) {
-                whole.push(`### ${file} (first 9000 chars)`, text.slice(0, 9000), "");
-            }
-            for (const [needle, radius, max] of NEEDLES) {
-                const arr = hits.get(needle) ?? [];
-                for (const sn of snippets(text, needle, radius, max)) if (arr.length < max) arr.push(`[${file}] ${sn}`);
-                hits.set(needle, arr);
-            }
-        } catch (e) {
-            lines.push(`  ${file}: ANALYSIS FAILED ${String(e)}`);
-        }
-    }
+        out.push("");
+    };
 
-    lines.push("");
-    for (const [needle] of NEEDLES) {
-        const arr = hits.get(needle) ?? [];
-        lines.push(`### ${needle}`, ...(arr.length ? arr : ["(no hits)"]));
-    }
-    lines.push("", "## dice-related chunks, whole", ...(whole.length ? whole : ["(none loaded)"]));
-    return lines.join("\n");
+    await run("env", sectionEnv);
+    out.push(`## server version\nGET /api/version -> ${await fetchText("/api/version")}`, "");
+    await run("top level", () => sectionTopLevel(api));
+    await run("hooks / eventBus / gameplay", () => [
+        ...describeTree("api.hooks", get(api, "hooks"), 2, { sources: true, maxSources: 10 }),
+        ...describeTree("api.eventBus", get(api, "eventBus"), 2, { sources: true, maxSources: 10 }),
+        ...describeTree("api.gameplay", get(api, "gameplay"), 2),
+    ]);
+    await run("systems", () => sectionSystems(api));
+    await run("sources", () => {
+        const lines = ["## source of the systems the sheet uses"];
+        const systems = get(api, "systems");
+        for (const key of safe(() => Object.getOwnPropertyNames(systems), [] as string[])) {
+            if (!SOURCE_SYSTEMS.test(key)) continue;
+            lines.push(...describeObject(`api.systems.${key}`, get(systems, key), { sources: true, maxSources: 30, sourceMax: 1200 }));
+        }
+        return lines;
+    });
+    await run("systemsState", () => sectionSystemsState(api));
+    await run("dice", async () => {
+        const dice = system(api, "dice");
+        await Promise.race([Promise.resolve(callM(dice, "loadSystems")), timeout(8000)]);
+        const raw = sraw(api, "dice");
+        return [
+            ...describeObject('dice.getSystem("2d")', callM(dice, "getSystem", "2d"), { sources: true, maxSources: 10, sourceMax: 800 }),
+            `dice state: ${safeStringify({ uiState: get(raw, "uiState"), textInput: get(raw, "textInput") }, 300)}`,
+            `dice history (last 2): ${safeStringify(tail(get(raw, "history"), 2), 1500)}`,
+            `room: ${safeStringify(sraw(api, "room"), 300)}`,
+        ];
+    });
+    await run("shape", () => sectionShape(api, shapeId));
+    await run("shape data", () => {
+        if (shapeId === undefined) return ["## token data", "(no token)"];
+        const getAll = (sys: string, fn: string): string =>
+            safeStringify(safe(() => callM(system(api, sys), fn, shapeId), undefined), 3000);
+        return [
+            "## token data",
+            `customData.export(): ${getAll("customData", "export")}`,
+            `trackers.getAll(): ${getAll("trackers", "getAll")}`,
+            `auras.getAll(): ${getAll("auras", "getAll")}`,
+        ];
+    });
+    await run("interest search", () => [
+        "## names matching dice/roll/chat/aura/tracker/custom/... anywhere in api (depth 4)",
+        ...findPaths(api, INTEREST),
+    ]);
+    await run("events", () => [
+        `## tracker / Custom Data events since page load (${diagState.busCount})`,
+        ...(diagState.busLog.length ? diagState.busLog.slice(-30).map((b) => `  ${b.time} ${b.name} ${b.json}`) : ["  (none)"]),
+        ...diagState.notes.slice(-20).map((n) => `  note: ${n}`),
+    ]);
+    await run("chunks", sectionChunks);
+    await run("window", sectionWindow);
+    await run("vue", sectionVueApp);
+    await run("bundle scan", bundleScan);
+    out.push("=== END ===");
+    return out.join("\n");
 }
 
-/** Console handle so specific things can be poked at by hand when asked. */
+/** Console handle: `pf1eApi` is the live API, `pf1eDiag` runs the reports. */
 export function exposeDebugHandle(api: unknown, getShapeId: () => number | undefined): void {
     (window as unknown as Dict).pf1eApi = api;
     (window as unknown as Dict).pf1eDiag = {
-        report: () => buildReport(api, getShapeId()),
-        quick: () => quickSummary(api),
+        apiDump: () => buildApiDump(api, getShapeId()),
         state: diagState,
     };
 }
