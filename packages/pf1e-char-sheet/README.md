@@ -54,7 +54,8 @@ which is why it did nothing.) Still worth confirming it survives a page reload.
 ## Dice rolls
 
 Roll buttons: Core tab (ability checks), Skills tab, Combat tab (initiative, saves, CMB) and the attacks
-table (Atk, and Dmg when the damage has dice).
+table (one button per iterative attack, labelled with its bonus - `+13` `+8` `+3` - and Dmg when the
+damage has dice).
 
 **Every button rolls against the token's Custom Data fields, never a pasted number**: `1d20 +
 {STR mod}`, `1d20 + {Spellcraft}`, `1d20 + {Atk 3 greatsword}`, `{Dmg 3 greatsword}`. A value edited
@@ -138,11 +139,14 @@ work as `{variables}`):
   `Max HP`, `Speed`, and `CL <class>` / `Concentration <class>` for each spellcasting class.
   (Current HP is deliberately not exported - it changes in play and lives in the tracker.)
 - `/skills`: one number per skill, e.g. `Spellcraft`.
-- `/attacks`: per weapon, `Atk <weapon>` (a number: the first iterative attack bonus) and `Dmg <weapon>`
+- `/attacks`: per weapon, `Atk <weapon>` (a number: the first iterative attack bonus; later attacks are
+  offsets from it, so one edit moves them all) and `Dmg <weapon>`
   (a rollable dice-expression: the damage formula; none for flat damage like "6").
 - `/rolls`: ready-made `dice-expression` elements: `Roll Initiative`, `Roll Fortitude|Reflex|Will`,
   `Roll CMB`, `Roll STR check` ..., `Roll Concentration <class>`, `Roll <skill>` for every skill, and
-  `Roll Attack <weapon>` (= `1d20 + {Atk <weapon>}`). They reference the number elements, so
+  `Roll Attack <weapon>` (= `1d20 + {Atk <weapon>}`). A weapon with iterative attacks (`+13/+8/+3`)
+  gets one per attack instead: `Roll Attack <weapon> 1st|2nd|3rd` (= `1d20 + {Atk <weapon>}`,
+  `1d20 + {Atk <weapon>} - 5`, `1d20 + {Atk <weapon>} - 10`). They reference the number elements, so
   re-importing updates the numbers and the rolls follow. (Older exports also had `Roll Damage
   <weapon>`; `Dmg <weapon>` replaced it, and the next sync removes the old ones.)
 
