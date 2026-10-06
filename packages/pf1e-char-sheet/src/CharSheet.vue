@@ -1,16 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount } from "vue";
 import type { LocalId } from "@planarally/mod-api";
+import { ref, watch, computed, onBeforeUnmount } from "vue";
 
-import { api } from "./main";
-import {
-    abilityModifier,
-    emptyCharacter,
-    DATA_BLOCK_NAME,
-    groupSpecials,
-    type PF1Character,
-} from "./data";
-import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { syncAuras } from "./auras";
 import {
     attackFormula,
@@ -24,9 +15,12 @@ import {
     removeCustomData,
     syncCustomData,
 } from "./customdata";
-import { pushHp, type HpPushResult } from "./trackers";
-import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
+import { abilityModifier, emptyCharacter, DATA_BLOCK_NAME, groupSpecials, type PF1Character } from "./data";
 import { buildApiDump, buildHealthCheck } from "./diagnostics";
+import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
+import { api } from "./main";
+import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
+import { pushHp, type HpPushResult } from "./trackers";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -38,9 +32,7 @@ const currentLocalId = ref<LocalId>();
 
 // --- HP tracker sync ----------------------------------------------------------------
 //
-// Built on what a live server really exposes (verified with the diagnostics build; the published
-// mod-api types are stale): trackers have add / getAll / update / remove, and PA announces every
-// change on api.eventBus. This file handles sheet -> tracker; main.ts handles tracker -> sheet by
+// Trackers have add / getAll / update / remove, and PA announces every change on api.eventBus. This file handles sheet -> tracker; main.ts handles tracker -> sheet by
 // listening for "tracker:updated" (current HP only - max HP is owned by the Hero Lab import).
 //
 // A push happens when you COMMIT the HP field (blur / Enter), not on every keystroke: pushing each
@@ -363,7 +355,8 @@ function renameShape(id: LocalId, name: string): string {
             properties?: { setName?: (id: number, name: string, sync: { ui: boolean; server: boolean }) => void };
         }
     ).properties;
-    if (!props || typeof props.setName !== "function") return "Token not renamed (no properties.setName on this server).";
+    if (!props || typeof props.setName !== "function")
+        return "Token not renamed (no properties.setName on this server).";
     try {
         props.setName(id, name, { ui: true, server: true });
         return `Token renamed to "${name}".`;
@@ -538,13 +531,7 @@ function fmt(n: number): string {
         <div class="pf1e-header">
             <div class="char-name">{{ data.identity.name || "Unnamed character" }}</div>
             <button type="button" @click="triggerImport">Import from Hero Lab…</button>
-            <input
-                ref="fileInput"
-                type="file"
-                accept=".xml"
-                style="display: none"
-                @change="onFileSelected"
-            />
+            <input ref="fileInput" type="file" accept=".xml" style="display: none" @change="onFileSelected" />
         </div>
         <div v-if="importError" class="error">{{ importError }}</div>
         <div v-if="data.importedAt" class="imported-at">
@@ -552,8 +539,7 @@ function fmt(n: number): string {
         </div>
         <div v-if="importNotes" class="imported-at">{{ importNotes }}</div>
         <div class="readonly-note">
-            All fields except current HP are read-only - update the character in Hero Lab and
-            re-import to change them.
+            All fields except current HP are read-only - update the character in Hero Lab and re-import to change them.
         </div>
         <div class="roll-bar">
             <span class="roll-mode">
@@ -591,11 +577,21 @@ function fmt(n: number): string {
 
         <div v-if="activeTab === 'Core'" class="pf1e-panel">
             <div class="grid-3">
-                <label>Race<span class="val">{{ data.identity.race }}</span></label>
-                <label>Alignment<span class="val">{{ data.identity.alignment }}</span></label>
-                <label>Deity<span class="val">{{ data.identity.deity }}</span></label>
-                <label>Size<span class="val">{{ data.identity.size }}</span></label>
-                <label>Gender<span class="val">{{ data.identity.gender }}</span></label>
+                <label
+                    >Race<span class="val">{{ data.identity.race }}</span></label
+                >
+                <label
+                    >Alignment<span class="val">{{ data.identity.alignment }}</span></label
+                >
+                <label
+                    >Deity<span class="val">{{ data.identity.deity }}</span></label
+                >
+                <label
+                    >Size<span class="val">{{ data.identity.size }}</span></label
+                >
+                <label
+                    >Gender<span class="val">{{ data.identity.gender }}</span></label
+                >
                 <label
                     >Gold
                     <span class="val">{{ data.currency.gp }}</span>
@@ -604,22 +600,24 @@ function fmt(n: number): string {
 
             <h4>Classes</h4>
             <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Class</th>
-                        <th>Level</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(cls, i) of data.classes" :key="i">
-                        <td><span class="val">{{ cls.name }}</span></td>
-                        <td>
-                            <span class="val">{{ cls.level }}</span>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Class</th>
+                            <th>Level</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(cls, i) of data.classes" :key="i">
+                            <td>
+                                <span class="val">{{ cls.name }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ cls.level }}</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
             <h4>Ability Scores</h4>
@@ -670,13 +668,12 @@ function fmt(n: number): string {
 
             <h4>Custom Data (for PlanarAlly's dice panel)</h4>
             <div class="readonly-note">
-                Every import writes the sheet's numbers and ready-made rolls into this token's Custom
-                Data (source "pf1e-sheet"). In PlanarAlly's dice panel type formulas like
-                1d20 + {Spellcraft} or 1d20 + {STR mod} (they use whichever token is selected), or open
-                the token's Custom Data tab and click a "Roll ..." element - it fills the dice panel and
-                you press Enter for a native roll, 3D dice and notification included. The roll buttons on
-                this sheet use these same fields, so a value changed there (a buff, a penalty) changes
-                every roll that uses it.
+                Every import writes the sheet's numbers and ready-made rolls into this token's Custom Data (source
+                "pf1e-sheet"). In PlanarAlly's dice panel type formulas like 1d20 + {Spellcraft} or 1d20 + {STR mod}
+                (they use whichever token is selected), or open the token's Custom Data tab and click a "Roll ..."
+                element - it fills the dice panel and you press Enter for a native roll, 3D dice and notification
+                included. The roll buttons on this sheet use these same fields, so a value changed there (a buff, a
+                penalty) changes every roll that uses it.
             </div>
             <div class="hp-push-row">
                 <button type="button" @click="exportCustomData">Export to Custom Data</button>
@@ -691,16 +688,27 @@ function fmt(n: number): string {
                 <span v-if="pushStatus" class="hp-push-status">{{ pushStatus }}</span>
             </div>
             <div class="roll-row">
-                <button type="button" :disabled="rolling" @click="rollMod('Initiative', sheetNames.init)">Roll initiative</button>
-                <button type="button" :disabled="rolling" @click="rollMod('Fortitude save', sheetNames.fort)">Fort</button>
-                <button type="button" :disabled="rolling" @click="rollMod('Reflex save', sheetNames.ref)">Reflex</button>
+                <button type="button" :disabled="rolling" @click="rollMod('Initiative', sheetNames.init)">
+                    Roll initiative
+                </button>
+                <button type="button" :disabled="rolling" @click="rollMod('Fortitude save', sheetNames.fort)">
+                    Fort
+                </button>
+                <button type="button" :disabled="rolling" @click="rollMod('Reflex save', sheetNames.ref)">
+                    Reflex
+                </button>
                 <button type="button" :disabled="rolling" @click="rollMod('Will save', sheetNames.will)">Will</button>
                 <button type="button" :disabled="rolling" @click="rollMod('CMB', sheetNames.cmb)">CMB</button>
             </div>
             <div class="grid-3">
                 <label
                     >HP
-                    <input v-model.number="data.combat.hp.current" class="hp-current" type="number" @change="onHpCommitted" />
+                    <input
+                        v-model.number="data.combat.hp.current"
+                        class="hp-current"
+                        type="number"
+                        @change="onHpCommitted"
+                    />
                     /
                     <span class="val">{{ data.combat.hp.max }}</span>
                 </label>
@@ -760,70 +768,99 @@ function fmt(n: number): string {
 
             <h4>Attacks</h4>
             <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Bonus</th>
-                        <th>Damage</th>
-                        <th>Crit</th>
-                        <th>Type</th>
-                        <th>Roll</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(atk, i) of data.combat.attacks" :key="i">
-                        <td><span class="val">{{ atk.name }}</span></td>
-                        <td><span class="val">{{ atk.bonus }}</span></td>
-                        <td><span class="val">{{ atk.damage }}</span></td>
-                        <td><span class="val">{{ atk.critical }}</span></td>
-                        <td><span class="val">{{ atk.damageType }}</span></td>
-                        <td class="roll-cell">
-                            <button v-if="!sheetNames.attacks[i]?.atk" type="button" disabled>Atk</button>
-                            <button
-                                v-for="(_, n) of sheetNames.attacks[i]?.atk ? sheetNames.attacks[i]!.offsets : []"
-                                :key="n"
-                                type="button"
-                                :disabled="rolling"
-                                :title="`Roll ${ordinal(n + 1)} attack`"
-                                @click="rollAttack(i, n)"
-                            >
-                                {{ attackBonusLabel(i, n) }}
-                            </button>
-                            <button v-if="sheetNames.attacks[i]?.dmg" type="button" :disabled="rolling" @click="rollDamage(i)">Dmg</button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Bonus</th>
+                            <th>Damage</th>
+                            <th>Crit</th>
+                            <th>Type</th>
+                            <th>Roll</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(atk, i) of data.combat.attacks" :key="i">
+                            <td>
+                                <span class="val">{{ atk.name }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ atk.bonus }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ atk.damage }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ atk.critical }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ atk.damageType }}</span>
+                            </td>
+                            <td class="roll-cell">
+                                <button v-if="!sheetNames.attacks[i]?.atk" type="button" disabled>Atk</button>
+                                <button
+                                    v-for="(_, n) of sheetNames.attacks[i]?.atk ? sheetNames.attacks[i]!.offsets : []"
+                                    :key="n"
+                                    type="button"
+                                    :disabled="rolling"
+                                    :title="`Roll ${ordinal(n + 1)} attack`"
+                                    @click="rollAttack(i, n)"
+                                >
+                                    {{ attackBonusLabel(i, n) }}
+                                </button>
+                                <button
+                                    v-if="sheetNames.attacks[i]?.dmg"
+                                    type="button"
+                                    :disabled="rolling"
+                                    @click="rollDamage(i)"
+                                >
+                                    Dmg
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
         <div v-else-if="activeTab === 'Skills'" class="pf1e-panel">
             <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Skill</th>
-                        <th>Ability</th>
-                        <th>Ranks</th>
-                        <th>Class</th>
-                        <th>Total</th>
-                        <th>Roll</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(skill, i) of data.skills" :key="i">
-                        <td>{{ skill.name }}</td>
-                        <td>{{ skill.ability.toUpperCase() }}</td>
-                        <td><span class="val">{{ skill.ranks }}</span></td>
-                        <td><span class="val">{{ skill.classSkill ? "✓" : "" }}</span></td>
-                        <td><span class="val">{{ skill.total }}</span></td>
-                        <td class="roll-cell">
-                            <button type="button" :disabled="rolling" @click="rollMod(skill.name, sheetNames.skills[i])">Roll</button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Skill</th>
+                            <th>Ability</th>
+                            <th>Ranks</th>
+                            <th>Class</th>
+                            <th>Total</th>
+                            <th>Roll</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(skill, i) of data.skills" :key="i">
+                            <td>{{ skill.name }}</td>
+                            <td>{{ skill.ability.toUpperCase() }}</td>
+                            <td>
+                                <span class="val">{{ skill.ranks }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ skill.classSkill ? "✓" : "" }}</span>
+                            </td>
+                            <td>
+                                <span class="val">{{ skill.total }}</span>
+                            </td>
+                            <td class="roll-cell">
+                                <button
+                                    type="button"
+                                    :disabled="rolling"
+                                    @click="rollMod(skill.name, sheetNames.skills[i])"
+                                >
+                                    Roll
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -832,13 +869,7 @@ function fmt(n: number): string {
             <ul class="feat-list">
                 <li v-for="(feat, i) of data.feats" :key="i">
                     <strong>{{ feat.name }}</strong>
-                    <span
-                        v-if="feat.fullText"
-                        class="info-icon"
-                        :title="feat.fullText"
-                        aria-label="Full text"
-                        >ⓘ</span
-                    >
+                    <span v-if="feat.fullText" class="info-icon" :title="feat.fullText" aria-label="Full text">ⓘ</span>
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
@@ -859,11 +890,7 @@ function fmt(n: number): string {
                     <ul class="spell-list">
                         <li v-for="(spell, j) of group.spells" :key="j">
                             <strong>{{ spell.name }}</strong>
-                            <span
-                                v-if="spell.fullText"
-                                class="info-icon"
-                                :title="spell.fullText"
-                                aria-label="Full text"
+                            <span v-if="spell.fullText" class="info-icon" :title="spell.fullText" aria-label="Full text"
                                 >ⓘ</span
                             >
                             <div class="hint">{{ spell.description }}</div>
@@ -883,13 +910,7 @@ function fmt(n: number): string {
                     <li v-for="sp of group.entries" :key="sp.name">
                         <strong>{{ sp.name }}</strong>
                         <span v-if="sp.source" class="special-source">{{ sp.source }}</span>
-                        <span
-                            v-if="sp.fullText"
-                            class="info-icon"
-                            :title="sp.fullText"
-                            aria-label="Full text"
-                            >ⓘ</span
-                        >
+                        <span v-if="sp.fullText" class="info-icon" :title="sp.fullText" aria-label="Full text">ⓘ</span>
                         <div class="hint">{{ sp.description }}</div>
                     </li>
                 </ul>
@@ -898,31 +919,29 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Inventory'" class="pf1e-panel">
             <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Item</th>
-                        <th>Qty</th>
-                        <th>Weight</th>
-                        <th>Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(item, i) of data.inventory" :key="i">
-                        <td>{{ item.name }}</td>
-                        <td>{{ item.quantity }}</td>
-                        <td>{{ item.weight }}</td>
-                        <td>{{ item.notes }}</td>
-                    </tr>
-                </tbody>
-            </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Weight</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(item, i) of data.inventory" :key="i">
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.quantity }}</td>
+                            <td>{{ item.weight }}</td>
+                            <td>{{ item.notes }}</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
         <div v-else-if="activeTab === 'Diagnostics' && isDm" class="pf1e-panel">
-            <div class="readonly-note">
-                Both reports are read-only. Copy the output into a bug report.
-            </div>
+            <div class="readonly-note">Both reports are read-only. Copy the output into a bug report.</div>
 
             <div class="diag-buttons">
                 <button
@@ -1038,7 +1057,6 @@ function fmt(n: number): string {
         font-size: 0.8rem;
         margin-bottom: 0.5rem;
     }
-
 
     .diag-buttons {
         display: flex;

@@ -108,9 +108,7 @@ export function parseHeroLabXml(xmlText: string): PF1Character {
 
     const character = doc.querySelector("document > public > character");
     if (!character) {
-        throw new HeroLabImportError(
-            "Couldn't find a <character> element - is this a Hero Lab XML export?",
-        );
+        throw new HeroLabImportError("Couldn't find a <character> element - is this a Hero Lab XML export?");
     }
 
     const result = emptyCharacter();
@@ -262,8 +260,7 @@ function parseSpells(character: Element, out: PF1Character): void {
         const spellsPerDay: Record<number, number> = {};
         for (const level of ownAll(spellClass, "spelllevel")) {
             const lvl = num(attr(level, "level"));
-            spellsPerDay[lvl] =
-                attr(level, "unlimited") === "yes" ? -1 : num(attr(level, "maxcasts"));
+            spellsPerDay[lvl] = attr(level, "unlimited") === "yes" ? -1 : num(attr(level, "maxcasts"));
         }
 
         // <spell class="..."> uses the bare class name (e.g. "Oracle"), while spellclass/class
@@ -322,7 +319,10 @@ const FEET_RE = /(\d+)\s*[- ]?\s*(?:ft|feet|foot)\b/i;
 const VISION_RE = /\b(darkvision|blindsight)\b[^0-9]{0,16}?(\d+)\s*[- ]?\s*(?:ft|feet|foot)\b/i;
 
 function slug(name: string): string {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
 }
 
 function parseAuras(character: Element, out: PF1Character): void {
@@ -353,9 +353,7 @@ function parseAuras(character: Element, out: PF1Character): void {
         // otherwise the name minus a trailing "(Su)"/"(Ex)"/"(Sp)".
         const name =
             attr(sp, "shortname") ||
-            full
-                .replace(/\s*\([^)]*\b(?:ft|feet|foot)\b[^)]*\)/gi, "")
-                .replace(/\s*\((?:su|ex|sp)\)\s*$/i, "");
+            full.replace(/\s*\([^)]*\b(?:ft|feet|foot)\b[^)]*\)/gi, "").replace(/\s*\((?:su|ex|sp)\)\s*$/i, "");
         add("effect", name.trim(), Number(radius[1]));
     }
 

@@ -109,9 +109,7 @@ export interface SpecialEntry {
 }
 
 /** Groups specials by category, keeping the order in which each category first appears. */
-export function groupSpecials(
-    specials: SpecialEntry[],
-): { category: string; entries: SpecialEntry[] }[] {
+export function groupSpecials(specials: SpecialEntry[]): { category: string; entries: SpecialEntry[] }[] {
     const groups = new Map<string, SpecialEntry[]>();
     for (const sp of specials) {
         const bucket = groups.get(sp.category);

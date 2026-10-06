@@ -13,7 +13,6 @@ From the repository root:
 
 ```zsh
 pnpm install
-pnpm -r build-api
 pnpm -F '@planarally/pf1e-char-sheet' build
 pnpm zip pf1e-char-sheet
 ```
