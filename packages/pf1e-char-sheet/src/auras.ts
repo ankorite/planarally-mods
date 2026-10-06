@@ -5,9 +5,8 @@ import { newUuid } from "./trackers";
 
 // Creates / updates / removes the auras derived from the Hero Lab specials on the token.
 //
-// Written against PlanarAlly's real runtime aura system, verified with the diagnostics build (the
-// published mod-api types don't describe auras at all): getAll / add / update / remove, no events.
-// The record shape below is PA's own default "New aura" as dumped from a live server.
+// PlanarAlly's aura system has getAll / add / update / remove and emits no events. The record shape
+// below is PA's own default "New aura".
 //
 // Auras the sheet creates are tracked by key -> PA uuid (stored with the character), never by
 // name, so renaming one in PA is fine and auras you made by hand are never touched.
@@ -94,12 +93,7 @@ export interface AuraSyncOutcome {
  *   - one we created before that Hero Lab no longer has is removed.
  * To hide an aura without it coming back on the next import, switch it off in PA instead of deleting it.
  */
-export function syncAuras(
-    api: GameApi,
-    shape: LocalId,
-    desired: SheetAura[],
-    previous: SheetAura[],
-): AuraSyncOutcome {
+export function syncAuras(api: GameApi, shape: LocalId, desired: SheetAura[], previous: SheetAura[]): AuraSyncOutcome {
     const strip = (list: SheetAura[]): SheetAura[] => list.map((a) => ({ ...a, uuid: "" }));
     if (desired.length === 0 && previous.length === 0) return { auras: [], summary: "" };
 

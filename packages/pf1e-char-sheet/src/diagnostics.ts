@@ -42,8 +42,12 @@ function recordBus(name: string, args: unknown[]): void {
 
 // The events PlanarAlly emits on api.eventBus that matter to the sheet.
 const BUS_EVENTS = [
-    "tracker:added", "tracker:updated", "tracker:removed",
-    "customData:added", "customData:updated", "customData:removed",
+    "tracker:added",
+    "tracker:updated",
+    "tracker:removed",
+    "customData:added",
+    "customData:updated",
+    "customData:removed",
 ];
 
 /** Keeps a log of tracker / Custom Data events for the reports. Our callbacks only record. */
@@ -137,9 +141,14 @@ function describeValue(v: unknown): string {
             return `obj<${ctorName(v)}>`;
         case "string":
             return `str:${JSON.stringify(v.slice(0, 30))}`;
-        default:
+        case "number":
+        case "boolean":
+        case "bigint":
             return `${typeof v}:${String(v)}`;
+        case "symbol":
+            return `symbol:${v.toString()}`;
     }
+    return "?";
 }
 
 function describeDescriptor(d: PropertyDescriptor | undefined): string {
@@ -168,11 +177,7 @@ function collectLevels(obj: unknown, maxLevels = 6): Level[] {
     const levels: Level[] = [];
     if (!isObjLike(obj)) return levels;
     let cur: object | null = obj;
-    for (
-        let i = 0;
-        cur !== null && cur !== Object.prototype && cur !== Function.prototype && i < maxLevels;
-        i++
-    ) {
+    for (let i = 0; cur !== null && cur !== Object.prototype && cur !== Function.prototype && i < maxLevels; i++) {
         const members: Member[] = [];
         let names: string[] = [];
         try {
@@ -330,11 +335,7 @@ function sectionEnv(): string[] {
 }
 
 function sectionTopLevel(api: unknown): string[] {
-    return [
-        "## api (top level)",
-        ...describeObject("api", api),
-        ...describeTree("api.ui", get(api, "ui"), 2),
-    ];
+    return ["## api (top level)", ...describeObject("api", api), ...describeTree("api.ui", get(api, "ui"), 2)];
 }
 
 const SYSTEM_SOURCE_RE = /track|aura|dice|roll|chat|custom|data|initiative/i;
@@ -435,7 +436,10 @@ function sectionVueApp(): string[] {
         const provides = get(get(app, "_context"), "provides");
         lines.push(
             `provides keys: ${safe(
-                () => Reflect.ownKeys(provides as object).map((k) => String(k)).join(", "),
+                () =>
+                    Reflect.ownKeys(provides as object)
+                        .map((k) => String(k))
+                        .join(", "),
                 "?",
             )}`,
         );
@@ -538,7 +542,11 @@ export async function buildHealthCheck(
             .catch((e: unknown) => bad(`${title}: check failed: ${String(e)}`));
 
     await section("Environment", async () => {
-        ok(`mod: ${String(get(diagState.meta, "name") ?? "?")} v${String(get(diagState.meta, "version") ?? "?")}`);
+        const meta = (key: string): string => {
+            const v = get(diagState.meta, key);
+            return typeof v === "string" ? v : "?";
+        };
+        ok(`mod: ${meta("name")} v${meta("version")}`);
         ok(`PlanarAlly: GET /api/version -> ${await fetchText("/api/version")}`);
         ok(`browser: ${navigator.userAgent}`);
         ok(`secure context: ${String(window.isSecureContext)} (copy-to-clipboard needs true)`);
@@ -574,7 +582,9 @@ export async function buildHealthCheck(
     }
 
     await section("Token", () => {
-        ok(`local id: ${shapeId}, global id: ${safeStringify(safe(() => callM(api, "getGlobalId", shapeId), undefined))}`);
+        ok(
+            `local id: ${shapeId}, global id: ${safeStringify(safe(() => callM(api, "getGlobalId", shapeId), undefined))}`,
+        );
         const props = safe(
             () => ((get(sstate(api, "properties"), "readonly") as Dict)["data"] as Map<number, unknown>).get(shapeId),
             undefined,
@@ -606,7 +616,9 @@ export async function buildHealthCheck(
         const hp = real.filter((t) => isHpTrackerName(get(t, "name")));
         const { current, max } = character.combat.hp;
         ok(`sheet HP: ${current} / ${max}`);
-        ok(`trackers on token: ${real.map((t) => `${String(get(t, "name"))} ${String(get(t, "value"))}/${String(get(t, "maxvalue"))}`).join(", ") || "(none)"}`);
+        ok(
+            `trackers on token: ${real.map((t) => `${String(get(t, "name"))} ${String(get(t, "value"))}/${String(get(t, "maxvalue"))}`).join(", ") || "(none)"}`,
+        );
         if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Core tab');
         else if (hp.length > 1) bad(`${hp.length} trackers named "HP" - only the first is synced`);
         const first = hp[0];
@@ -620,7 +632,8 @@ export async function buildHealthCheck(
         const mine = exported.filter((e) => get(e, "source") === CD_SOURCE && get(e, "pending") === undefined);
         const others = exported.filter((e) => get(e, "source") !== CD_SOURCE && get(e, "pending") === undefined);
         const expected = buildElements(character);
-        const k = (prefix: unknown, name: unknown): string => `${String(prefix).toLowerCase()}|${String(name).toLowerCase()}`;
+        const k = (prefix: unknown, name: unknown): string =>
+            `${String(prefix).toLowerCase()}|${String(name).toLowerCase()}`;
         const have = new Map(mine.map((e) => [k(get(e, "prefix"), get(e, "name")), e]));
         const missing: string[] = [];
         const outdated: string[] = [];
@@ -630,13 +643,28 @@ export async function buildHealthCheck(
             have.delete(key);
             if (!cur) missing.push(`${want.prefix}/${want.name}`);
             else if (get(cur, "kind") !== want.kind || get(cur, "value") !== want.value) {
-                outdated.push(`${want.prefix}/${want.name} (token ${safeStringify(get(cur, "value"))}, sheet ${safeStringify(want.value)})`);
+                outdated.push(
+                    `${want.prefix}/${want.name} (token ${safeStringify(get(cur, "value"))}, sheet ${safeStringify(want.value)})`,
+                );
             }
         }
-        ok(`sheet exports ${expected.length} elements; token has ${mine.length} from the sheet, ${others.length} from elsewhere`);
-        if (missing.length) bad(`${missing.length} missing (use "Export to Custom Data"): ${missing.slice(0, 20).join(", ")}${missing.length > 20 ? ", ..." : ""}`);
-        if (outdated.length) bad(`${outdated.length} differ from the sheet: ${outdated.slice(0, 20).join("; ")}${outdated.length > 20 ? "; ..." : ""}`);
-        if (have.size) ok(`${have.size} left over from an older export (removed on next export): ${Array.from(have.values()).map((e) => String(get(e, "name"))).join(", ")}`);
+        ok(
+            `sheet exports ${expected.length} elements; token has ${mine.length} from the sheet, ${others.length} from elsewhere`,
+        );
+        if (missing.length)
+            bad(
+                `${missing.length} missing (use "Export to Custom Data"): ${missing.slice(0, 20).join(", ")}${missing.length > 20 ? ", ..." : ""}`,
+            );
+        if (outdated.length)
+            bad(
+                `${outdated.length} differ from the sheet: ${outdated.slice(0, 20).join("; ")}${outdated.length > 20 ? "; ..." : ""}`,
+            );
+        if (have.size)
+            ok(
+                `${have.size} left over from an older export (removed on next export): ${Array.from(have.values())
+                    .map((e) => String(get(e, "name")))
+                    .join(", ")}`,
+            );
         if (!missing.length && !outdated.length) ok("all sheet elements present and up to date");
     });
 
@@ -667,7 +695,10 @@ export async function buildHealthCheck(
         for (const a of character.auras ?? []) {
             const onToken = a.uuid !== "" && live.some((x) => get(x, "uuid") === a.uuid);
             if (onToken) ok(`sheet aura ${a.name} ${a.radius} ft: on token`);
-            else bad(`sheet aura ${a.name} ${a.radius} ft is not on the token - use "Create / update auras on the token"`);
+            else
+                bad(
+                    `sheet aura ${a.name} ${a.radius} ft is not on the token - use "Create / update auras on the token"`,
+                );
         }
         if (!(character.auras ?? []).length) ok("the sheet has no auras for this character");
     });
@@ -856,7 +887,13 @@ export async function buildApiDump(api: unknown, shapeId: number | undefined): P
         const systems = get(api, "systems");
         for (const key of safe(() => Object.getOwnPropertyNames(systems), [] as string[])) {
             if (!SOURCE_SYSTEMS.test(key)) continue;
-            lines.push(...describeObject(`api.systems.${key}`, get(systems, key), { sources: true, maxSources: 30, sourceMax: 1200 }));
+            lines.push(
+                ...describeObject(`api.systems.${key}`, get(systems, key), {
+                    sources: true,
+                    maxSources: 30,
+                    sourceMax: 1200,
+                }),
+            );
         }
         return lines;
     });
@@ -866,7 +903,11 @@ export async function buildApiDump(api: unknown, shapeId: number | undefined): P
         await Promise.race([Promise.resolve(callM(dice, "loadSystems")), timeout(8000)]);
         const raw = sraw(api, "dice");
         return [
-            ...describeObject('dice.getSystem("2d")', callM(dice, "getSystem", "2d"), { sources: true, maxSources: 10, sourceMax: 800 }),
+            ...describeObject('dice.getSystem("2d")', callM(dice, "getSystem", "2d"), {
+                sources: true,
+                maxSources: 10,
+                sourceMax: 800,
+            }),
             `dice state: ${safeStringify({ uiState: get(raw, "uiState"), textInput: get(raw, "textInput") }, 300)}`,
             `dice history (last 2): ${safeStringify(tail(get(raw, "history"), 2), 1500)}`,
             `room: ${safeStringify(sraw(api, "room"), 300)}`,
@@ -876,7 +917,10 @@ export async function buildApiDump(api: unknown, shapeId: number | undefined): P
     await run("shape data", () => {
         if (shapeId === undefined) return ["## token data", "(no token)"];
         const getAll = (sys: string, fn: string): string =>
-            safeStringify(safe(() => callM(system(api, sys), fn, shapeId), undefined), 3000);
+            safeStringify(
+                safe(() => callM(system(api, sys), fn, shapeId), undefined),
+                3000,
+            );
         return [
             "## token data",
             `customData.export(): ${getAll("customData", "export")}`,
@@ -890,7 +934,9 @@ export async function buildApiDump(api: unknown, shapeId: number | undefined): P
     ]);
     await run("events", () => [
         `## tracker / Custom Data events since page load (${diagState.busCount})`,
-        ...(diagState.busLog.length ? diagState.busLog.slice(-30).map((b) => `  ${b.time} ${b.name} ${b.json}`) : ["  (none)"]),
+        ...(diagState.busLog.length
+            ? diagState.busLog.slice(-30).map((b) => `  ${b.time} ${b.name} ${b.json}`)
+            : ["  (none)"]),
         ...diagState.notes.slice(-20).map((n) => `  note: ${n}`),
     ]);
     await run("chunks", sectionChunks);

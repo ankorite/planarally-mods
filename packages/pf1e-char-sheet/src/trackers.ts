@@ -1,11 +1,9 @@
 import type { GameApi, LocalId } from "@planarally/mod-api";
 
-// HP <-> tracker sync, written against what a live PlanarAlly server (release 2026.2) ACTUALLY
-// exposes, verified by running the diagnostics build against it - not against the published
-// @planarally/mod-api types, which describe `getOrCreate` / `preTrackerUpdate` and similar names
-// that don't exist at runtime. The real tracker system has add / getAll / get / update / remove,
-// and PA announces changes on `api.eventBus` ("tracker:added" / "tracker:updated" /
-// "tracker:removed"), emitted AFTER the change has been applied.
+// HP <-> tracker sync. PlanarAlly's tracker system has add / getAll / get / update / remove, and PA
+// announces changes on `api.eventBus` ("tracker:added" / "tracker:updated" / "tracker:removed"),
+// emitted AFTER the change has been applied. The system is reached through the narrow interface
+// below and checked at runtime, so a server without these functions degrades gracefully.
 
 /** The HP tracker is matched by name (case-insensitive) so it also adopts a hand-made one. */
 export const HP_TRACKER_NAME = "hp";

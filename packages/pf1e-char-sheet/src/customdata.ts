@@ -32,7 +32,10 @@ export interface CdElement {
 
 /** Variable names may only contain [\w /]; "/" is the path separator, so it is dropped too. */
 export function cdName(raw: string): string {
-    return raw.replace(/[^\w ]+/g, " ").replace(/\s+/g, " ").trim();
+    return raw
+        .replace(/[^\w ]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 /** A caster class without its archetype: "Oracle (Dual-Cursed Oracle)" -> "Oracle". */
@@ -326,9 +329,14 @@ export function removeCustomData(api: GameApi, shape: LocalId): CdOutcome {
 const LEASE_KEY = "pf1e-sheet";
 
 export function holdCustomDataLease(api: GameApi, shape: LocalId): () => void {
-    const cd = (api.systems as unknown as {
-        customData?: { loadState?: (id: number, key: string) => void; dropState?: (id: number, key: string) => void };
-    }).customData;
+    const cd = (
+        api.systems as unknown as {
+            customData?: {
+                loadState?: (id: number, key: string) => void;
+                dropState?: (id: number, key: string) => void;
+            };
+        }
+    ).customData;
     if (!cd || typeof cd.loadState !== "function" || typeof cd.dropState !== "function") return () => undefined;
     cd.loadState(shape, LEASE_KEY);
     let released = false;

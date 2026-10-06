@@ -100,7 +100,8 @@ function findField(api: unknown, shape: number, path: string): RawElement | unde
 }
 
 function expand(api: unknown, shape: number, formula: string, missing: string[], depth: number): string {
-    if (depth > MAX_DEPTH) throw new RollError("A Custom Data formula refers back to itself (or is nested too deeply).");
+    if (depth > MAX_DEPTH)
+        throw new RollError("A Custom Data formula refers back to itself (or is nested too deeply).");
     return formula.replace(fieldRe(), (_whole, discriminator: string | undefined, path: string) => {
         const target = discriminator === undefined ? shape : Number.parseInt(discriminator.slice(1, -1), 10);
         const el = findField(api, target, path);
@@ -108,7 +109,9 @@ function expand(api: unknown, shape: number, formula: string, missing: string[],
             missing.push(path);
             return "";
         }
-        return el.kind === "dice-expression" ? expand(api, target, String(el.value), missing, depth + 1) : String(el.value);
+        return el.kind === "dice-expression"
+            ? expand(api, target, String(el.value), missing, depth + 1)
+            : String(el.value);
     });
 }
 
@@ -141,7 +144,8 @@ function describePart(p: unknown): string {
     if (typeof get(p, "die") === "string" && Number(get(p, "amount")) > 1 && typeof long === "string" && long) {
         return `[${long.replace(/[*~]/g, "").split(",").join(", ")}]`;
     }
-    return String(get(p, "shortResult") ?? get(p, "input") ?? "");
+    const short = get(p, "shortResult") ?? get(p, "input");
+    return typeof short === "string" || typeof short === "number" ? String(short) : "";
 }
 
 export interface RollOptions {
@@ -181,7 +185,8 @@ export async function rollFormula(api: unknown, formula: string, opts: RollOptio
 
     let toRoll = formula;
     if (hasField(formula)) {
-        if (opts.shape === undefined) throw new RollError("This formula uses Custom Data fields but no token was given.");
+        if (opts.shape === undefined)
+            throw new RollError("This formula uses Custom Data fields but no token was given.");
         toRoll = resolveFormula(api, opts.shape, formula);
     }
 
