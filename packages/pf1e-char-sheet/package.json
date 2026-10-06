@@ -8,7 +8,7 @@
             "import": "./dist/pf1e-char-sheet.js"
         }
     },
-    "version": "0.0.0",
+    "version": "0.18.0",
     "private": true,
     "scripts": {
         "dev": "vite",
