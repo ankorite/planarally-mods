@@ -11,6 +11,9 @@
     - one roll button per iterative attack (`+13/+8/+3`)
     - Diagnostics tab reduced to two read-only reports: a health check and a full API dump
     - ported to the `@planarally/mod-api` npm package and the new toolchain
+- pf1e-char-sheet v0.19.0: roll macros moved out of the `/rolls` branch to the top level of Custom Data,
+  limited to initiative, saves, attacks and damage, plus skills picked in a new Macro column on the
+  Skills tab
 
 ## [2025-05-04]
 

@@ -101,6 +101,13 @@ export interface SheetNames {
     attacks: { atk?: string; offsets: number[]; dmg?: string }[];
 }
 
+/**
+ * Where the roll macros go: the top level of Custom Data, not a branch. PlanarAlly lists every
+ * dice-expression element as a macro on its dice prompt, so only rolls meant to be macros are
+ * dice-expressions; everything else is a number in a branch.
+ */
+export const MACRO_PREFIX = "/";
+
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
 
 /** The elements this sheet exports, in a stable order, plus the names its buttons need. */
@@ -141,12 +148,11 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
     add("/combat", "Max HP", "number", num(c.combat.hp.max));
     add("/combat", "Speed", "number", num(c.combat.speed));
 
-    const concentration: [string, string][] = [];
     for (const sc of c.spellcasting) {
         const cls = baseClass(sc.className);
         if (!cls) continue;
         add("/combat", `CL ${cls}`, "number", num(sc.casterLevel));
-        concentration.push([cls, add("/combat", `Concentration ${cls}`, "number", num(sc.concentration))]);
+        add("/combat", `Concentration ${cls}`, "number", num(sc.concentration));
     }
 
     const skills: string[] = [];
@@ -154,8 +160,8 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
 
     // Attacks: the first iterative attack bonus is a number (so a buff can be typed in as a Custom Data
     // edit and every roll follows); the later attacks are offsets from it, not fields of their own. The
-    // damage formula is a rollable dice-expression. A flat damage figure ("6") has nothing to roll and
-    // gets no field.
+    // damage formula is itself a macro (a dice-expression). A flat damage figure ("6") has nothing to
+    // roll and gets no macro.
     const attacks: SheetNames["attacks"] = [];
     for (const atk of c.combat.attacks) {
         const label = atk.name.trim();
@@ -166,36 +172,36 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
             entry.atk = add("/attacks", `Atk ${label}`, "number", first);
             entry.offsets = bonuses.map((b) => b - first);
         }
-        if (/\d\s*d\s*\d/i.test(atk.damage)) {
-            entry.dmg = add("/attacks", `Dmg ${label}`, "dice-expression", atk.damage.trim());
-        }
         attacks.push(entry);
     }
 
-    // --- ready-made rolls: click one in the token's Custom Data tab (or type {Roll ...}) ---
-    add("/rolls", "Roll Initiative", "dice-expression", checkFormula(init));
-    add("/rolls", "Roll Fortitude", "dice-expression", checkFormula(fort));
-    add("/rolls", "Roll Reflex", "dice-expression", checkFormula(refl));
-    add("/rolls", "Roll Will", "dice-expression", checkFormula(will));
-    add("/rolls", "Roll CMB", "dice-expression", checkFormula(cmb));
-    for (const key of ABILITY_KEYS) {
-        add("/rolls", `Roll ${key.toUpperCase()} check`, "dice-expression", checkFormula(abilityMod[key]));
-    }
-    for (const [cls, concName] of concentration) {
-        add("/rolls", `Roll Concentration ${cls}`, "dice-expression", checkFormula(concName));
-    }
-    c.skills.forEach((skill, i) => {
-        const fieldName = skills[i];
-        if (fieldName) add("/rolls", `Roll ${skill.name}`, "dice-expression", checkFormula(fieldName));
-    });
+    // --- roll macros: initiative, saves, attacks and the skills picked on the Skills tab ---
+    add(MACRO_PREFIX, "Roll Initiative", "dice-expression", checkFormula(init));
+    add(MACRO_PREFIX, "Roll Fortitude", "dice-expression", checkFormula(fort));
+    add(MACRO_PREFIX, "Roll Reflex", "dice-expression", checkFormula(refl));
+    add(MACRO_PREFIX, "Roll Will", "dice-expression", checkFormula(will));
+    // Per weapon: one macro per iterative attack, then its damage.
     c.combat.attacks.forEach((atk, i) => {
         const entry = attacks[i];
-        if (!entry?.atk) return;
-        const base = `Roll Attack ${atk.name.trim()}`;
-        entry.offsets.forEach((offset, n) => {
-            const name = entry.offsets.length > 1 ? `${base} ${ordinal(n + 1)}` : base;
-            add("/rolls", name, "dice-expression", attackFormula(entry.atk!, offset));
-        });
+        if (!entry) return;
+        const label = atk.name.trim();
+        const fieldName = entry.atk;
+        if (fieldName) {
+            entry.offsets.forEach((offset, n) => {
+                const name = `Roll Attack ${label}${entry.offsets.length > 1 ? ` ${ordinal(n + 1)}` : ""}`;
+                add(MACRO_PREFIX, name, "dice-expression", attackFormula(fieldName, offset));
+            });
+        }
+        if (/\d\s*d\s*\d/i.test(atk.damage)) {
+            entry.dmg = add(MACRO_PREFIX, `Roll Damage ${label}`, "dice-expression", atk.damage.trim());
+        }
+    });
+    const macroSkills = new Set(c.macroSkills ?? []);
+    c.skills.forEach((skill, i) => {
+        const fieldName = skills[i];
+        if (fieldName && macroSkills.has(skill.name)) {
+            add(MACRO_PREFIX, `Roll ${skill.name}`, "dice-expression", checkFormula(fieldName));
+        }
     });
 
     return {
