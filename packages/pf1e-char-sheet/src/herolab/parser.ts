@@ -1,4 +1,4 @@
-// Parses a Hero Lab "Export As -> XML" file for Pathfinder 1e into our PF1Character shape.
+// Parses a Hero Lab XML export (File > Custom Output > Export XML) for Pathfinder 1e into our PF1Character shape.
 //
 // This is built directly against real exports (Hero Lab 8.9h, Pathfinder RPG data files),
 // not the general HL schema docs, since HL's XML shape varies a fair bit by which game-system

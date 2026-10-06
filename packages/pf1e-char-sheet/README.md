@@ -1,7 +1,7 @@
 # PF1e Character Sheet
 
 A PlanarAlly mod that adds a Pathfinder 1st Edition character sheet tab to shapes marked as
-characters, with one-click import from a Hero Lab XML export (File > Export > XML).
+characters, with one-click import from a Hero Lab XML export (File > Custom Output > Export XML).
 
 Hero Lab is the source of truth: the sheet is read-only except for current HP. Edit the character in
 Hero Lab, re-export and re-import to update the sheet, and only adjust current HP in PlanarAlly
