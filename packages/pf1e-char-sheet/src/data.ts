@@ -167,6 +167,11 @@ export type PF1Character = {
      * Optional because characters saved before this existed don't have it.
      */
     macroSkills?: string[];
+    /**
+     * Names of the attacks left out of the dice macros (unticked on the Combat tab). Attacks are in by
+     * default, so this lists exclusions; kept across re-imports. Optional for older saves.
+     */
+    macroExcludedAttacks?: string[];
     notes: string;
     /** Free-form provenance so the sheet can show "last imported ..." */
     importedAt: string | undefined;
@@ -200,6 +205,7 @@ export function emptyCharacter(): PF1Character {
         auras: [],
         specials: [],
         macroSkills: [],
+        macroExcludedAttacks: [],
         notes: "",
         importedAt: undefined,
     };

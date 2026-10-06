@@ -110,9 +110,11 @@ What is written:
     - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`
     - per weapon, `Roll Attack <weapon>` (`1d20 + {Atk <weapon>}`), or one per attack for iterative
       attacks (`+13/+8/+3` → `Roll Attack <weapon> 1st|2nd|3rd`: `1d20 + {Atk <weapon>}`, `... - 5`,
-      `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6")
+      `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6").
+      Every weapon is included until you untick it in the **Macro** column of the Combat tab's attacks
+      table; its sheet buttons keep working either way.
     - `Roll <skill>` for each skill ticked in the **Macro** column of the Skills tab. The choice is
-      saved with the character and kept when you re-import.
+      saved with the character and kept when you re-import (as is the attack choice).
 
 PlanarAlly lists every roll macro in the **Dice Macros** panel of its dice prompt while the token is
 selected; click one and press Enter to roll it. Only these rolls are macros: everything else is a

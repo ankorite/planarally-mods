@@ -13,7 +13,8 @@
     - ported to the `@planarally/mod-api` npm package and the new toolchain
 - pf1e-char-sheet v0.19.0: roll macros moved out of the `/rolls` branch to the top level of Custom Data,
   limited to initiative, saves, attacks and damage, plus skills picked in a new Macro column on the
-  Skills tab
+  Skills tab; each weapon's attack and damage macros can be switched off in a Macro column on the
+  Combat tab
 
 ## [2025-05-04]
 

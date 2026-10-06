@@ -238,6 +238,8 @@ async function onFileSelected(event: Event): Promise<void> {
         // re-imports (dropping any skill the new export no longer has).
         const skillNames = new Set(character.skills.map((s) => s.name));
         character.macroSkills = (data.value.macroSkills ?? []).filter((n) => skillNames.has(n));
+        const attackNames = new Set(character.combat.attacks.map((a) => a.name));
+        character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
         const notes: string[] = [];
 
@@ -314,10 +316,26 @@ function isMacroSkill(name: string): boolean {
     return (data.value.macroSkills ?? []).includes(name);
 }
 
-/** The Skills tab's Macro checkbox: saves the choice and re-exports Custom Data so the macro appears/goes. */
+/** The Skills tab's Macro checkbox (skills are out of the macros unless ticked). */
 function toggleMacroSkill(name: string, on: boolean): void {
     const current = (data.value.macroSkills ?? []).filter((n) => n !== name);
     data.value.macroSkills = on ? [...current, name] : current;
+    applyMacroChange(name, on);
+}
+
+function isMacroAttack(name: string): boolean {
+    return !(data.value.macroExcludedAttacks ?? []).includes(name);
+}
+
+/** The Combat tab's Macro checkbox (attacks are in the macros unless unticked). */
+function toggleMacroAttack(name: string, on: boolean): void {
+    const current = (data.value.macroExcludedAttacks ?? []).filter((n) => n !== name);
+    data.value.macroExcludedAttacks = on ? current : [...current, name];
+    applyMacroChange(name, on);
+}
+
+/** Saves a macro choice and re-exports Custom Data so the macro appears or goes right away. */
+function applyMacroChange(name: string, on: boolean): void {
     save();
     const id = currentLocalId.value;
     let text = "";
@@ -520,12 +538,13 @@ function attackBonusLabel(i: number, n: number): string {
 
 function rollDamage(i: number): void {
     const name = data.value.combat.attacks[i]?.name ?? "attack";
-    const fieldName = sheetNames.value.attacks[i]?.dmg;
-    if (!fieldName) {
+    const entry = sheetNames.value.attacks[i];
+    if (!entry?.damage) {
         rollStatus.value = `${name} has no dice to roll for damage.`;
         return;
     }
-    void doRoll(`Damage: ${name}`, field(fieldName));
+    // The damage macro when the attack is in the macros (so a Custom Data edit applies), else the formula.
+    void doRoll(`Damage: ${name}`, entry.dmg ? field(entry.dmg) : entry.damage);
 }
 
 function spellsByLevel(spells: PF1Character["spellcasting"][number]["spells"]) {
@@ -797,6 +816,11 @@ function fmt(n: number): string {
             </div>
 
             <h4>Attacks</h4>
+            <div class="readonly-note">
+                Untick <strong>Macro</strong> to leave a weapon's attack and damage rolls out of PlanarAlly's dice
+                macros; its buttons here still work.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
@@ -807,6 +831,7 @@ function fmt(n: number): string {
                             <th>Crit</th>
                             <th>Type</th>
                             <th>Roll</th>
+                            <th>Macro</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -839,13 +864,21 @@ function fmt(n: number): string {
                                     {{ attackBonusLabel(i, n) }}
                                 </button>
                                 <button
-                                    v-if="sheetNames.attacks[i]?.dmg"
+                                    v-if="sheetNames.attacks[i]?.damage"
                                     type="button"
                                     :disabled="rolling"
                                     @click="rollDamage(i)"
                                 >
                                     Dmg
                                 </button>
+                            </td>
+                            <td>
+                                <input
+                                    type="checkbox"
+                                    :checked="isMacroAttack(atk.name)"
+                                    :title="`Show ${atk.name}'s attack and damage rolls in PlanarAlly's dice macros`"
+                                    @change="toggleMacroAttack(atk.name, ($event.target as HTMLInputElement).checked)"
+                                />
                             </td>
                         </tr>
                     </tbody>
@@ -855,8 +888,8 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Skills'" class="pf1e-panel">
             <div class="readonly-note">
-                Tick <strong>Macro</strong> to add a skill to PlanarAlly's dice macros for this token. Initiative,
-                saves, attacks and damage are always there.
+                Tick <strong>Macro</strong> to add a skill to PlanarAlly's dice macros for this token. Initiative and
+                saves are always there; attacks are chosen on the Combat tab.
                 <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
             </div>
             <div class="table-wrap">
