@@ -92,7 +92,10 @@ async function syncTrackerIntoSheet(id: LocalId, current: number, character: boo
     // Also skips the echo of our own sheet -> tracker push.
     if (block.data.combat.hp.current === current) return;
 
-    block.data.combat.hp.current = current;
+    // Write through `reactiveData`, not `block.data`: both are the same object, but only the reactive
+    // proxy tells Vue about the change. Writing `block.data` directly stored and synced the new HP but
+    // left an open sheet showing the old value, which its next HP commit could push back to the tracker.
+    block.reactiveData.value.combat.hp.current = current;
     block.sync();
 }
 
