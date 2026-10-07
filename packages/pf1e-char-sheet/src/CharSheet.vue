@@ -74,7 +74,7 @@ watch(
 );
 
 // A character gets the full sheet; any other token (monsters, NPCs - the tab only shows for the DM)
-// gets the limited one: combat, skills and specials.
+// gets the limited one: core, combat, skills and specials.
 const isCharacter = computed(() => currentLocalId.value !== undefined && isCharacterShape(api, currentLocalId.value));
 
 const pushStatus = ref("");
@@ -158,7 +158,7 @@ function setWidth(w: WidthKey): void {
 }
 
 const BASE_TABS = ["Core", "Combat", "Skills", "Feats & Spells", "Specials", "Inventory"] as const;
-const LIMITED_TABS = ["Combat", "Skills", "Specials"] as const;
+const LIMITED_TABS = ["Core", "Combat", "Skills", "Specials"] as const;
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Core");
 

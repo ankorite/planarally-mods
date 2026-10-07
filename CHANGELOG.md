@@ -4,7 +4,7 @@
 
 - pf1e-char-sheet v0.20.0:
     - limited sheet for monsters and NPCs: any token that isn't a character gets a DM-only sheet with
-      Combat, Skills and Specials tabs, filled from a Hero Lab import
+      Core, Combat, Skills and Specials tabs, filled from a Hero Lab import
     - uses the official `@planarally/mod-api` types for trackers, the event bus, data blocks and tab
       registration, and implements `dispose`
     - the sheet follows the focused token instead of the active character

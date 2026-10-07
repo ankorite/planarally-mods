@@ -27,7 +27,7 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
 - `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Feats & Spells / Specials / Inventory tabs,
-  or Combat / Skills / Specials for a monster/NPC)
+  or Core / Combat / Skills / Specials for a monster/NPC)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -65,8 +65,9 @@ Known limitations:
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
 monster or NPC from Hero Lab the same way as a character and import it on the token. It works like the
 full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
-macros) but only has three tabs:
+macros) but only has four tabs:
 
+- **Core**: race, size, classes, ability scores with check rolls, auras and the Custom Data buttons
 - **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
 - **Skills**: skills with roll buttons and the Macro column
 - **Specials**: Hero Lab's special abilities
