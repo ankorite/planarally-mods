@@ -38,11 +38,12 @@ import {
 } from "./data";
 import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
-import { api } from "./main";
+import { api, modVersion } from "./main";
 import { syncResources } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { pushHp, type HpPushResult } from "./trackers";
+import { newerVersion, REPO_URL } from "./updates";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -198,6 +199,38 @@ const visibleTabs = computed<readonly TabName[]>(() => {
     const tabs = hasSpells.value ? all : all.filter((t) => t !== "Spells");
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
+
+// --- Update check (DM only): a newer version of the mod on GitHub ------------------------------
+// Players can't install mods, so only the DM is told (and only the DM's browser asks GitHub).
+// Dismissing hides the message until the next new version.
+const UPDATE_DISMISSED_KEY = "pf1e-sheet-update-dismissed";
+const availableUpdate = ref<string>();
+
+watch(
+    isDm,
+    async (dm) => {
+        availableUpdate.value = undefined;
+        if (!dm) return;
+        const version = await newerVersion(modVersion);
+        let dismissed: string | null = null;
+        try {
+            dismissed = localStorage.getItem(UPDATE_DISMISSED_KEY);
+        } catch {
+            /* storage unavailable: show it */
+        }
+        if (version && version !== dismissed && viewerIsDm(api)) availableUpdate.value = version;
+    },
+    { immediate: true },
+);
+
+function dismissUpdate(): void {
+    try {
+        if (availableUpdate.value) localStorage.setItem(UPDATE_DISMISSED_KEY, availableUpdate.value);
+    } catch {
+        /* not remembered; hidden for now anyway */
+    }
+    availableUpdate.value = undefined;
+}
 
 // Keep the open tab valid when the sheet switches between a character and a monster/NPC, or the DM
 // role goes away while Diagnostics is open (e.g. switching to fake player).
@@ -778,6 +811,11 @@ function fmt(n: number): string {
 
 <template>
     <div id="pf1e-sheet" :style="widthStyle">
+        <div v-if="availableUpdate" class="update-banner">
+            PF1e sheet {{ availableUpdate }} is available (you have {{ modVersion }}).
+            <a :href="REPO_URL" target="_blank" rel="noopener noreferrer">Get it on GitHub</a>
+            <button type="button" title="Hide until the next version" @click="dismissUpdate">✕</button>
+        </div>
         <div class="pf1e-header">
             <div class="char-name">
                 {{ data.identity.name || (isCharacter ? "Unnamed character" : "Unnamed creature") }}
@@ -1508,6 +1546,22 @@ function fmt(n: number): string {
         white-space: pre-wrap;
         overflow: auto;
         resize: vertical;
+    }
+
+    .update-banner {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.3rem 0.5rem;
+        margin-bottom: 0.5rem;
+        border: 1px solid #3b82f6;
+        border-radius: 4px;
+        background: #eff6ff;
+        font-size: 0.8rem;
+
+        button {
+            margin-left: auto;
+        }
     }
 
     .adjusted-note {

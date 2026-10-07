@@ -9,9 +9,13 @@ import { isHpTrackerName } from "./trackers";
 // Shared game API handle, set in initGame and used throughout the mod.
 export let api: GameApi;
 
+/** The installed version (from mod.toml, as PlanarAlly loaded it), for the sheet's update check. */
+export let modVersion: string | undefined;
+
 function init(meta: ApiModMeta): void {
     console.log(`Loading ${meta.name} v${meta.version}`);
     diagState.meta = meta;
+    modVersion = meta.version;
 }
 
 function initGame(gameApi: GameApi): void {

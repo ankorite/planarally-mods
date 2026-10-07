@@ -38,6 +38,7 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/spells.ts` — spell dice macros and the formula guessed from a spell's text
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
+- `src/updates.ts` — checks GitHub for a newer version of the mod
 
 ## Importing from Hero Lab
 
@@ -242,6 +243,7 @@ feet.
 - **The limited sheet** (monsters and NPCs) appears on every other token, for the DM only. A DM
   previewing as a "fake player" doesn't see it.
 - **The Diagnostics tab** is DM-only.
+- **The update message** (a newer version on GitHub) is DM-only.
 
 ## Diagnostics
 
@@ -253,6 +255,18 @@ The DM-only **Diagnostics** tab has two read-only reports to copy into a bug rep
   the top.
 - **Full API dump**: everything PlanarAlly's mod API exposes, plus a scan of PlanarAlly's own code
   for hook and event names. It is large; use it when a PlanarAlly update breaks something.
+
+## Update check
+
+When the DM opens a sheet, the mod reads the `version` in this package's `mod.toml` on the repository's
+`main` branch (from `raw.githubusercontent.com`) and compares it with the installed version. If GitHub's
+is newer, a banner at the top of the sheet says so, with a link to the repository. **✕** hides it until
+the next new version.
+
+- Only the DM sees it, and only the DM's browser contacts GitHub, once per page load.
+- An installed version newer than `main` (a test build) shows nothing.
+- If GitHub can't be reached, or the repository is made private, there's simply no message.
+- GitHub caches the file for up to 5 minutes, so a just-merged version can take a few minutes to show.
 
 ## Sheet width
 
