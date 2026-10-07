@@ -75,7 +75,7 @@ and the attacks table). Each weapon gets one button per iterative attack, labell
 (`+13` `+8` `+3`), plus **Dmg** when the damage has dice.
 
 Every button rolls against the token's Custom Data fields rather than a fixed number, e.g.
-`1d20 + {STR mod}`, `1d20 + {Spellcraft}`, `1d20 + {Atk greatsword} - 5`. Editing a value in
+`1d20 + {STR mod}`, `1d20 + {Spellcraft}`, `1d20 + {Atk greatsword} - 5`, `{Roll Damage greatsword}`. Editing a value in
 PlanarAlly's Custom Data tab (a buff, a penalty) therefore changes every roll that uses it. If a field
 is missing, the sheet re-exports Custom Data once and retries; it never rolls with a modifier silently
 dropped.
@@ -88,7 +88,7 @@ Two roll modes, chosen above the tabs and remembered per browser:
   PlanarAlly's result card opens and the roll is added to your dice history.
 
 Crit confirmation, crit multipliers and per-weapon crit ranges are not handled; **Dmg** rolls the base
-damage formula.
+damage formula (the `Roll Damage <weapon>` macro).
 
 ## Custom Data export
 
@@ -105,15 +105,21 @@ What is written:
   Current HP is not exported; it lives in the tracker.
 - `/skills`: one number per skill, e.g. `Spellcraft`.
 - `/attacks`: per weapon, `Atk <weapon>` (the first attack bonus; later iterative attacks are offsets
-  from it, so one edit moves them all) and `Dmg <weapon>` (the damage dice; none for flat damage).
-- `/rolls`: ready-made rolls — `Roll Initiative`, `Roll Fortitude|Reflex|Will`, `Roll CMB`,
-  `Roll STR check` ..., `Roll Concentration <class>`, `Roll <skill>`, and `Roll Attack <weapon>`
-  (`1d20 + {Atk <weapon>}`). A weapon with iterative attacks (`+13/+8/+3`) gets one per attack:
-  `Roll Attack <weapon> 1st|2nd|3rd` (`1d20 + {Atk <weapon>}`, `... - 5`, `... - 10`).
+  from it, so one edit moves them all).
+- Roll macros, at the top level rather than in a branch:
+    - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`
+    - per weapon, `Roll Attack <weapon>` (`1d20 + {Atk <weapon>}`), or one per attack for iterative
+      attacks (`+13/+8/+3` → `Roll Attack <weapon> 1st|2nd|3rd`: `1d20 + {Atk <weapon>}`, `... - 5`,
+      `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6").
+      Every weapon is included until you untick it in the **Macro** column of the Combat tab's attacks
+      table; its sheet buttons keep working either way.
+    - `Roll <skill>` for each skill ticked in the **Macro** column of the Skills tab. The choice is
+      saved with the character and kept when you re-import (as is the attack choice).
 
-To roll from PlanarAlly directly, select the token, open its Custom Data tab and click a "Roll ..."
-element, then press Enter in the dice panel. You can also type your own formulas there, such as
-`1d20 + {STR mod} + {BAB}`.
+PlanarAlly lists every roll macro in the **Dice Macros** panel of its dice prompt while the token is
+selected; click one and press Enter to roll it. Only these rolls are macros: everything else is a
+number, so ability checks, CMB and Concentration stay on the sheet's buttons and out of the panel. You
+can also type your own formulas in the dice prompt, such as `1d20 + {STR mod} + {BAB}`.
 
 Names contain only letters, digits and spaces so they work as `{variables}` (e.g. "Knowledge (arcana)"
 becomes "Knowledge arcana"), and are unique across all prefixes. Re-exporting only changes what

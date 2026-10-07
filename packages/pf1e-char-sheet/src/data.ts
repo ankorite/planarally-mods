@@ -162,6 +162,16 @@ export type PF1Character = {
     auras?: SheetAura[];
     /** Hero Lab's Specials tab. Optional because characters saved before this existed lack it. */
     specials?: SpecialEntry[];
+    /**
+     * Names of the skills exported as dice macros (chosen on the Skills tab; kept across re-imports).
+     * Optional because characters saved before this existed don't have it.
+     */
+    macroSkills?: string[];
+    /**
+     * Names of the attacks left out of the dice macros (unticked on the Combat tab). Attacks are in by
+     * default, so this lists exclusions; kept across re-imports. Optional for older saves.
+     */
+    macroExcludedAttacks?: string[];
     notes: string;
     /** Free-form provenance so the sheet can show "last imported ..." */
     importedAt: string | undefined;
@@ -194,6 +204,8 @@ export function emptyCharacter(): PF1Character {
         currency: { gp: 0 },
         auras: [],
         specials: [],
+        macroSkills: [],
+        macroExcludedAttacks: [],
         notes: "",
         importedAt: undefined,
     };

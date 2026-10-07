@@ -669,7 +669,7 @@ export async function buildHealthCheck(
     });
 
     await section("Roll formulas (resolved, not rolled)", () => {
-        const rolls = buildElements(character).filter((e) => e.prefix === "/rolls" || e.kind === "dice-expression");
+        const rolls = buildElements(character).filter((e) => e.kind === "dice-expression");
         let good = 0;
         for (const r of rolls) {
             try {
