@@ -144,6 +144,13 @@ export interface SpellEntry {
     fullText: string;
     /** true if prepared/known this is currently loaded into a slot (prepared casters) */
     prepared: boolean;
+    /** Hero Lab's statblock fields; optional because spells imported before this lack them. */
+    dc?: number;
+    save?: string;
+    range?: string;
+    duration?: string;
+    castTime?: string;
+    school?: string;
 }
 
 export interface SpellcastingClass {
@@ -153,6 +160,22 @@ export interface SpellcastingClass {
     /** spell level -> slots per day, e.g. { 0: 4, 1: 3, 2: 2 } */
     spellsPerDay: Record<number, number>;
     spells: SpellEntry[];
+}
+
+/**
+ * A limited-use ability (x/day, x/round) or a spell level's slots per day, kept as a PlanarAlly
+ * tracker on the token. Like auras, the sheet remembers the tracker it made by key -> uuid.
+ */
+export interface SheetResource {
+    /** Stable identity across re-imports, e.g. "res:darkness" or "slots:oracle:1". */
+    key: string;
+    /** Tracker name, e.g. "Darkness (3/day)" or "Oracle level 1 slots". */
+    name: string;
+    max: number;
+    /** Uses already spent in Hero Lab at export time (only used when the tracker is first made). */
+    used: number;
+    /** PlanarAlly's uuid for the tracker on the token; "" until it has been created. */
+    uuid: string;
 }
 
 /** One entry from Hero Lab's Specials tab (senses, auras, defensive/offensive abilities, items...). */
@@ -234,6 +257,13 @@ export type PF1Character = {
      * default, so this lists exclusions; kept across re-imports. Optional for older saves.
      */
     macroExcludedAttacks?: string[];
+    /** Tracked resources (x/day, x/round, spell slots). Optional for older saves. */
+    resources?: SheetResource[];
+    /**
+     * Spells exported as dice macros: `enabled` holds spell keys (see spellKey in spells.ts) and
+     * `formulas` any formula edited on the Spells tab. Optional for older saves.
+     */
+    spellMacros?: { enabled: string[]; formulas: Record<string, string> };
     /**
      * Adjustments (buffs, conditions) layered on top of the imported numbers; see adjustments.ts.
      * Optional because characters saved before this existed don't have it.
@@ -274,6 +304,8 @@ export function emptyCharacter(): PF1Character {
         macroSkills: [],
         macroExcludedAttacks: [],
         adjustments: { enabled: [], custom: [] },
+        resources: [],
+        spellMacros: { enabled: [], formulas: {} },
         notes: "",
         importedAt: undefined,
     };

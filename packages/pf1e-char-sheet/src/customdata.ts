@@ -2,6 +2,7 @@ import type { GameApi, LocalId } from "@planarally/mod-api";
 
 import { applyAdjustments } from "./adjustments";
 import { abilityModifier, type AbilityKey, type PF1Character } from "./data";
+import { macroSpells } from "./spells";
 
 // Writes the sheet into the token's Custom Data, so PlanarAlly's own dice panel can use it.
 //
@@ -218,6 +219,8 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
             add(MACRO_PREFIX, `Roll ${skill.name}`, "dice-expression", checkFormula(fieldName));
         }
     });
+    // Spells ticked on the Spells tab, with their (guessed or edited) formula.
+    for (const spell of macroSpells(c)) add(MACRO_PREFIX, `Cast ${spell.name}`, "dice-expression", spell.formula);
 
     return {
         elements: out,

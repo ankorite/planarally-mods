@@ -33,11 +33,15 @@ import {
     type AdjustmentState,
     type AdjustmentTarget,
     type PF1Character,
+    type SpellcastingClass,
+    type SpellEntry,
 } from "./data";
 import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api } from "./main";
+import { syncResources } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
+import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { pushHp, type HpPushResult } from "./trackers";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
@@ -178,8 +182,8 @@ function setWidth(w: WidthKey): void {
     }
 }
 
-const BASE_TABS = ["Core", "Combat", "Skills", "Adjustments", "Feats & Spells", "Specials", "Inventory"] as const;
-const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Specials"] as const;
+const BASE_TABS = ["Core", "Combat", "Skills", "Adjustments", "Feats", "Spells", "Specials", "Inventory"] as const;
+const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Spells", "Specials"] as const;
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Core");
 
@@ -187,8 +191,11 @@ const activeTab = ref<TabName>("Core");
 // A DM who has switched to "fake player" (to preview what players see) gets the player view, i.e.
 // no Diagnostics tab either.
 const isDm = computed(() => viewerIsDm(api));
+// The Spells tab only appears for a character or creature that has spells.
+const hasSpells = computed(() => data.value.spellcasting.some((sc) => sc.spells.length > 0));
 const visibleTabs = computed<readonly TabName[]>(() => {
-    const tabs: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
+    const all: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
+    const tabs = hasSpells.value ? all : all.filter((t) => t !== "Spells");
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
 
@@ -269,6 +276,13 @@ async function onFileSelected(event: Event): Promise<void> {
         character.adjustments = JSON.parse(
             JSON.stringify(data.value.adjustments ?? { enabled: [], custom: [] }),
         ) as AdjustmentState;
+        // And the spells picked as dice macros (with any edited formulas), for spells still there.
+        const spellKeys = new Set(character.spellcasting.flatMap((sc) => sc.spells.map((s) => spellKey(sc, s))));
+        const prevSpellMacros = data.value.spellMacros ?? { enabled: [], formulas: {} };
+        character.spellMacros = {
+            enabled: prevSpellMacros.enabled.filter((k) => spellKeys.has(k)),
+            formulas: Object.fromEntries(Object.entries(prevSpellMacros.formulas).filter(([k]) => spellKeys.has(k))),
+        };
         const attackNames = new Set(character.combat.attacks.map((a) => a.name));
         character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
@@ -286,13 +300,28 @@ async function onFileSelected(event: Event): Promise<void> {
                 console.error("[pf1e-sheet] aura sync after import failed", e);
                 notes.push("Aura sync failed - see the console.");
             }
+            // Same for the x/day, x/round and spell-slot trackers.
+            try {
+                const result = syncResources(
+                    api,
+                    id,
+                    character.resources ?? [],
+                    data.value.resources ?? [],
+                    isCharacter.value,
+                );
+                character.resources = result.resources;
+                if (result.summary) notes.push(result.summary);
+            } catch (e) {
+                console.error("[pf1e-sheet] tracker sync after import failed", e);
+                notes.push("Tracker sync failed - see the console.");
+            }
         }
 
         write(character);
         save();
 
         if (id === undefined) {
-            notes.push("No token selected - skipped renaming it, the HP tracker and the auras.");
+            notes.push("No token selected - skipped renaming it, the trackers and the auras.");
         } else {
             notes.push(renameShape(id, character.identity.name));
             try {
@@ -401,8 +430,8 @@ function isAdjustmentOn(key: string): boolean {
     return (data.value.adjustments?.enabled ?? []).includes(key);
 }
 
-/** Saves the adjustments and re-exports Custom Data, so the numbers, rolls and dice macros follow. */
-function applyAdjustmentChange(message: string): void {
+/** Saves a change and re-exports Custom Data, so the numbers, rolls and dice macros follow. */
+function saveAndReexport(message: string): void {
     save();
     const id = currentLocalId.value;
     let text = "";
@@ -423,7 +452,47 @@ function toggleAdjustment(key: string, name: string, on: boolean): void {
     const state = adjustmentState();
     state.enabled = state.enabled.filter((k) => k !== key);
     if (on) state.enabled.push(key);
-    applyAdjustmentChange(`${name} ${on ? "on" : "off"}.`);
+    saveAndReexport(`${name} ${on ? "on" : "off"}.`);
+}
+
+// --- Spell macros --------------------------------------------------------------------------------
+
+function spellMacroState(): { enabled: string[]; formulas: Record<string, string> } {
+    data.value.spellMacros ??= { enabled: [], formulas: {} };
+    return data.value.spellMacros;
+}
+
+function isSpellMacro(sc: SpellcastingClass, spell: SpellEntry): boolean {
+    return (data.value.spellMacros?.enabled ?? []).includes(spellKey(sc, spell));
+}
+
+function toggleSpellMacro(sc: SpellcastingClass, spell: SpellEntry, on: boolean): void {
+    const state = spellMacroState();
+    const key = spellKey(sc, spell);
+    state.enabled = state.enabled.filter((k) => k !== key);
+    if (on) state.enabled.push(key);
+    const note = on && !spellFormula(data.value, sc, spell).trim() ? " Enter a formula for it to appear." : "";
+    saveAndReexport(`Cast ${spell.name} ${on ? "added to" : "removed from"} the dice macros.${note}`);
+}
+
+/** Saves an edited formula; an empty field goes back to the formula guessed from the spell's text. */
+function setSpellFormula(sc: SpellcastingClass, spell: SpellEntry, value: string): void {
+    const state = spellMacroState();
+    const key = spellKey(sc, spell);
+    const trimmed = value.trim();
+    const guess = guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+    if (trimmed === "" || trimmed === guess) delete state.formulas[key];
+    else state.formulas[key] = trimmed;
+    saveAndReexport(`${spell.name}: formula ${trimmed || guess || "cleared"}.`);
+}
+
+function rollSpell(sc: SpellcastingClass, spell: SpellEntry): void {
+    const formula = spellFormula(data.value, sc, spell).trim();
+    if (!formula) {
+        rollStatus.value = `${spell.name} has no formula to roll - enter one in its field.`;
+        return;
+    }
+    void doRoll(`Cast ${spell.name}`, formula);
 }
 
 const newAdjName = ref("");
@@ -447,14 +516,14 @@ function addCustomAdjustment(): void {
     state.enabled.push(id);
     newAdjName.value = "";
     newAdjEffects.value = [{ target: "attack", type: "untyped", value: 1 }];
-    applyAdjustmentChange(`${name} added and switched on.`);
+    saveAndReexport(`${name} added and switched on.`);
 }
 
 function removeCustomAdjustment(id: string, name: string): void {
     const state = adjustmentState();
     state.custom = state.custom.filter((a) => a.id !== id);
     state.enabled = state.enabled.filter((k) => k !== id);
-    applyAdjustmentChange(`${name} removed.`);
+    saveAndReexport(`${name} removed.`);
 }
 
 /** Removes every Custom Data element this sheet wrote; elements you made by hand are untouched. */
@@ -468,6 +537,32 @@ function clearCustomData(): void {
         console.error("[pf1e-sheet] Custom Data removal failed", e);
         flashCd("Custom Data removal failed - see the console.");
     }
+}
+
+const resourceStatus = ref("");
+let resourceStatusTimeout: ReturnType<typeof setTimeout> | undefined;
+
+/** The Core tab's button: (re)create missing x/day, x/round and slot trackers, without a re-import. */
+function resyncResources(): void {
+    const id = currentLocalId.value;
+    let text: string;
+    if (id === undefined) {
+        text = "No token selected.";
+    } else {
+        try {
+            const current = data.value.resources ?? [];
+            const result = syncResources(api, id, current, current, isCharacter.value);
+            data.value.resources = result.resources;
+            save();
+            text = result.summary || (current.length ? "Trackers are already up to date." : "No trackers to create.");
+        } catch (e) {
+            console.error("[pf1e-sheet] tracker resync failed", e);
+            text = "Tracker sync failed - see the console.";
+        }
+    }
+    resourceStatus.value = text;
+    clearTimeout(resourceStatusTimeout);
+    resourceStatusTimeout = setTimeout(() => (resourceStatus.value = ""), 6000);
 }
 
 const auraStatus = ref("");
@@ -827,6 +922,31 @@ function fmt(n: number): string {
                 <span v-if="auraStatus" class="hp-push-status">{{ auraStatus }}</span>
             </div>
 
+            <h4>Trackers (x/day, x/round, spell slots)</h4>
+            <div v-if="(data.resources ?? []).length" class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tracker</th>
+                            <th>Max</th>
+                            <th>On token</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="res of data.resources ?? []" :key="res.key">
+                            <td>{{ res.name }}</td>
+                            <td>{{ res.max }}</td>
+                            <td>{{ res.uuid ? "yes" : "no" }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div v-else class="readonly-note">No limited-use abilities or spell slots in the Hero Lab export.</div>
+            <div class="hp-push-row">
+                <button type="button" @click="resyncResources">Create / update trackers on the token</button>
+                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
+            </div>
+
             <h4>Custom Data (for PlanarAlly's dice panel)</h4>
             <div class="readonly-note">
                 Every import writes the sheet's numbers and roll macros into this token's Custom Data (source
@@ -1107,8 +1227,7 @@ function fmt(n: number): string {
             </div>
         </div>
 
-        <div v-else-if="activeTab === 'Feats & Spells'" class="pf1e-panel">
-            <h4>Feats</h4>
+        <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
             <ul class="feat-list">
                 <li v-for="(feat, i) of data.feats" :key="i">
                     <strong>{{ feat.name }}</strong>
@@ -1116,29 +1235,91 @@ function fmt(n: number): string {
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
+        </div>
 
-            <h4>Spellcasting</h4>
+        <div v-else-if="activeTab === 'Spells'" class="pf1e-panel">
+            <div class="readonly-note">
+                Tick <strong>Macro</strong> to add a spell to PlanarAlly's dice macros as "Cast &lt;spell&gt;". Its
+                formula is guessed from the spell's text at its caster level - edit it if needed (clear it to go back to
+                the guess). Spells without dice start empty.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
             <div v-for="(sc, i) of data.spellcasting" :key="i" class="spell-class">
                 <div class="spell-class-header">
                     <strong>{{ sc.className }}</strong>
-                    CL {{ sc.casterLevel }} · Concentration {{ fmt(sc.concentration) }}
+                    CL {{ sc.casterLevel
+                    }}<template v-if="sc.concentration"> · Concentration {{ fmt(sc.concentration) }}</template>
                 </div>
-                <div class="spells-per-day">
+                <div v-if="Object.keys(sc.spellsPerDay).length" class="spells-per-day">
                     <span v-for="(slots, level) of sc.spellsPerDay" :key="level">
-                        Lv{{ level }}: {{ slots === -1 ? "at will" : slots }}
+                        Lv{{ level }}: {{ slots === -1 ? "at will" : `${slots}/day` }}
                     </span>
                 </div>
                 <div v-for="group of spellsByLevel(sc.spells)" :key="group.level" class="spell-level-group">
                     <h5>Level {{ group.level }}</h5>
-                    <ul class="spell-list">
-                        <li v-for="(spell, j) of group.spells" :key="j">
-                            <strong>{{ spell.name }}</strong>
-                            <span v-if="spell.fullText" class="info-icon" :title="spell.fullText" aria-label="Full text"
-                                >ⓘ</span
-                            >
-                            <div class="hint">{{ spell.description }}</div>
-                        </li>
-                    </ul>
+                    <div class="table-wrap">
+                        <table class="spell-table">
+                            <thead>
+                                <tr>
+                                    <th>Spell</th>
+                                    <th>DC</th>
+                                    <th>Range</th>
+                                    <th>Duration</th>
+                                    <th>Macro</th>
+                                    <th>Formula</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="spell of group.spells" :key="spell.name">
+                                    <td>
+                                        <strong>{{ spell.name }}</strong>
+                                        <span
+                                            v-if="spell.fullText"
+                                            class="info-icon"
+                                            :title="spell.fullText"
+                                            aria-label="Full text"
+                                            >ⓘ</span
+                                        >
+                                        <div class="hint">{{ spell.description }}</div>
+                                    </td>
+                                    <td :title="spell.save">{{ spell.dc ?? "" }}</td>
+                                    <td>{{ spell.range ?? "" }}</td>
+                                    <td>{{ spell.duration ?? "" }}</td>
+                                    <td>
+                                        <input
+                                            type="checkbox"
+                                            :checked="isSpellMacro(sc, spell)"
+                                            :title="`Show Cast ${spell.name} in PlanarAlly's dice macros`"
+                                            @change="
+                                                toggleSpellMacro(sc, spell, ($event.target as HTMLInputElement).checked)
+                                            "
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            class="spell-formula"
+                                            type="text"
+                                            :value="spellFormula(data, sc, spell)"
+                                            placeholder="e.g. 3d6"
+                                            @change="
+                                                setSpellFormula(sc, spell, ($event.target as HTMLInputElement).value)
+                                            "
+                                        />
+                                    </td>
+                                    <td class="roll-cell">
+                                        <button
+                                            type="button"
+                                            :disabled="rolling || !spellFormula(data, sc, spell).trim()"
+                                            @click="rollSpell(sc, spell)"
+                                        >
+                                            Roll
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1357,6 +1538,16 @@ function fmt(n: number): string {
             flex: 1 1 auto;
             color: #555;
             font-size: 0.75rem;
+        }
+    }
+
+    .spell-table {
+        .spell-formula {
+            width: 6rem;
+        }
+
+        td {
+            vertical-align: top;
         }
     }
 
