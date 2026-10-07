@@ -1,4 +1,4 @@
-import type { GameApi, LocalId } from "@planarally/mod-api";
+import type { GameApi, LocalId, Sync } from "@planarally/mod-api";
 
 import type { SheetAura } from "./data";
 import { newUuid } from "./trackers";
@@ -10,11 +10,6 @@ import { newUuid } from "./trackers";
 //
 // Auras the sheet creates are tracked by key -> PA uuid (stored with the character), never by
 // name, so renaming one in PA is fine and auras you made by hand are never touched.
-
-interface Sync {
-    ui: boolean;
-    server: boolean;
-}
 
 interface RealAura {
     uuid: string;

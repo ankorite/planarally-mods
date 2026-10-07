@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## [2026-10-07]
+
+- pf1e-char-sheet v0.20.0:
+    - limited sheet for monsters and NPCs: any token that isn't a character gets a DM-only sheet with
+      Core, Combat, Skills, Adjustments and Specials tabs, filled from a Hero Lab import
+    - uses the official `@planarally/mod-api` types for trackers, the event bus, data blocks and tab
+      registration, and implements `dispose`
+    - the sheet follows the focused token instead of the active character
+    - Adjustments tab: built-in PF1 buffs and conditions plus custom adjustments, toggled on and off,
+      with PF1 stacking, applied to the sheet's numbers, rolls and dice macros
+    - damage macros use only the leading dice formula ("2d6+4 plus grab" -> "2d6+4")
+    - fixed: an open sheet kept showing the old current HP after the token's HP tracker was edited
+
 ## [2026-10-06]
 
 - removed the api lib in favour of the new npm package `@planarally/mod-api`

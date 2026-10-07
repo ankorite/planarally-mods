@@ -17,6 +17,63 @@ export interface AbilityScores {
 
 export type AbilityKey = keyof AbilityScores;
 
+/** PF1 bonus types. Same-type bonuses don't stack (the highest applies), except the stacking ones. */
+export type BonusType =
+    | "untyped"
+    | "alchemical"
+    | "armor"
+    | "circumstance"
+    | "competence"
+    | "deflection"
+    | "dodge"
+    | "enhancement"
+    | "insight"
+    | "luck"
+    | "morale"
+    | "natural"
+    | "profane"
+    | "resistance"
+    | "sacred"
+    | "shield"
+    | "size";
+
+/** What an adjustment changes. Ability keys change the score, and everything derived from it. */
+export type AdjustmentTarget =
+    | AbilityKey
+    | "attack"
+    | "meleeAttack"
+    | "rangedAttack"
+    | "damage"
+    | "meleeDamage"
+    | "ac"
+    | "saves"
+    | "fort"
+    | "ref"
+    | "will"
+    | "skills"
+    | "init"
+    | "cmd"
+    | "speed";
+
+export interface AdjustmentEffect {
+    target: AdjustmentTarget;
+    type: BonusType;
+    value: number;
+}
+
+/** An adjustment made on the sheet (the built-in ones live in adjustments.ts). */
+export interface CustomAdjustment {
+    id: string;
+    name: string;
+    effects: AdjustmentEffect[];
+}
+
+export interface AdjustmentState {
+    /** Keys of the enabled adjustments: built-in keys, or custom ids. */
+    enabled: string[];
+    custom: CustomAdjustment[];
+}
+
 /** An aura the sheet derived from Hero Lab and (once synced) created on the token. */
 export interface SheetAura {
     /** Stable identity across re-imports, e.g. "vision:darkvision" or "effect:aura-of-courage". */
@@ -53,6 +110,11 @@ export interface AttackEntry {
     /** e.g. "S", "P", "B", "S/P" */
     damageType: string;
     notes: string;
+    /**
+     * From Hero Lab's <melee> or <ranged> list: decides whether Str or Dex adjustments apply. Optional
+     * because characters imported before this existed lack it (treated as melee).
+     */
+    kind?: "melee" | "ranged";
 }
 
 export interface SkillEntry {
@@ -172,6 +234,11 @@ export type PF1Character = {
      * default, so this lists exclusions; kept across re-imports. Optional for older saves.
      */
     macroExcludedAttacks?: string[];
+    /**
+     * Adjustments (buffs, conditions) layered on top of the imported numbers; see adjustments.ts.
+     * Optional because characters saved before this existed don't have it.
+     */
+    adjustments?: AdjustmentState;
     notes: string;
     /** Free-form provenance so the sheet can show "last imported ..." */
     importedAt: string | undefined;
@@ -206,6 +273,7 @@ export function emptyCharacter(): PF1Character {
         specials: [],
         macroSkills: [],
         macroExcludedAttacks: [],
+        adjustments: { enabled: [], custom: [] },
         notes: "",
         importedAt: undefined,
     };

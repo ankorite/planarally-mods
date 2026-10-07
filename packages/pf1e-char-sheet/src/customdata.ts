@@ -1,5 +1,6 @@
 import type { GameApi, LocalId } from "@planarally/mod-api";
 
+import { applyAdjustments } from "./adjustments";
 import { abilityModifier, type AbilityKey, type PF1Character } from "./data";
 
 // Writes the sheet into the token's Custom Data, so PlanarAlly's own dice panel can use it.
@@ -112,8 +113,18 @@ export const MACRO_PREFIX = "/";
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
 
-/** The elements this sheet exports, in a stable order, plus the names its buttons need. */
-export function buildSheet(c: PF1Character): { elements: CdElement[]; names: SheetNames } {
+/** The leading dice formula of a Hero Lab damage text: "2d6+4 plus grab" -> "2d6+4"; none for flat damage. */
+export function damageFormula(text: string): string | undefined {
+    return /^\s*\d+\s*d\s*\d+(?:\s*[+-]\s*\d+)?/i.exec(text)?.[0].replace(/\s+/g, "");
+}
+
+/**
+ * The elements this sheet exports, in a stable order, plus the names its buttons need. The
+ * character's enabled adjustments are applied first, so the numbers, macros and roll buttons all
+ * include them. Pass the stored character, not an already-adjusted copy.
+ */
+export function buildSheet(stored: PF1Character): { elements: CdElement[]; names: SheetNames } {
+    const c = applyAdjustments(stored);
     const out: CdElement[] = [];
     const used = new Set<string>();
 
@@ -187,7 +198,8 @@ export function buildSheet(c: PF1Character): { elements: CdElement[]; names: She
     c.combat.attacks.forEach((atk, i) => {
         const entry = attacks[i];
         if (!entry) return;
-        if (/\d\s*d\s*\d/i.test(atk.damage)) entry.damage = atk.damage.trim();
+        const damage = damageFormula(atk.damage);
+        if (damage) entry.damage = damage;
         if (excludedAttacks.has(atk.name)) return;
         const label = atk.name.trim();
         const fieldName = entry.atk;
