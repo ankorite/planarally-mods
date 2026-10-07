@@ -11,6 +11,7 @@
     - Adjustments tab: built-in PF1 buffs and conditions plus custom adjustments, toggled on and off,
       with PF1 stacking, applied to the sheet's numbers, rolls and dice macros
     - damage macros use only the leading dice formula ("2d6+4 plus grab" -> "2d6+4")
+    - fixed: an open sheet kept showing the old current HP after the token's HP tracker was edited
 
 ## [2026-10-06]
 
