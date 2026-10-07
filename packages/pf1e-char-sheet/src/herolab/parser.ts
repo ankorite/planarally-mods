@@ -189,17 +189,21 @@ function parseCombat(character: Element, out: PF1Character): void {
     // Current effective speed (already reduced for armor/load), matching HL's own sheet.
     out.combat.speed = num(attr(own(own(character, "movement"), "speed"), "value"));
 
+    const toAttack =
+        (kind: "melee" | "ranged") =>
+        (weapon: Element): AttackEntry => ({
+            name: attr(weapon, "name"),
+            bonus: attr(weapon, "attack"),
+            damage: attr(weapon, "damage"),
+            critical: attr(weapon, "crit"),
+            damageType: attr(weapon, "typetext"),
+            notes: "",
+            kind,
+        });
     const attacks: AttackEntry[] = [
-        ...ownAll(own(character, "melee"), "weapon"),
-        ...ownAll(own(character, "ranged"), "weapon"),
-    ].map((weapon) => ({
-        name: attr(weapon, "name"),
-        bonus: attr(weapon, "attack"),
-        damage: attr(weapon, "damage"),
-        critical: attr(weapon, "crit"),
-        damageType: attr(weapon, "typetext"),
-        notes: "",
-    }));
+        ...ownAll(own(character, "melee"), "weapon").map(toAttack("melee")),
+        ...ownAll(own(character, "ranged"), "weapon").map(toAttack("ranged")),
+    ];
     out.combat.attacks = attacks;
 }
 

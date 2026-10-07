@@ -3,6 +3,14 @@ import type { LocalId } from "@planarally/mod-api";
 import { ref, watch, computed, onBeforeUnmount } from "vue";
 
 import { isCharacterShape, isDm as viewerIsDm } from "./access";
+import {
+    applyAdjustments,
+    BONUS_TYPES,
+    BUILTIN_ADJUSTMENTS,
+    describeEffects,
+    enabledAdjustments,
+    TARGET_LABELS,
+} from "./adjustments";
 import { syncAuras } from "./auras";
 import {
     attackFormula,
@@ -16,7 +24,16 @@ import {
     removeCustomData,
     syncCustomData,
 } from "./customdata";
-import { abilityModifier, emptyCharacter, DATA_BLOCK_NAME, groupSpecials, type PF1Character } from "./data";
+import {
+    abilityModifier,
+    emptyCharacter,
+    DATA_BLOCK_NAME,
+    groupSpecials,
+    type AdjustmentEffect,
+    type AdjustmentState,
+    type AdjustmentTarget,
+    type PF1Character,
+} from "./data";
 import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api } from "./main";
@@ -26,6 +43,10 @@ import { pushHp, type HpPushResult } from "./trackers";
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
 });
+
+// What the sheet shows: the stored character with its enabled adjustments applied (adjustments.ts).
+// Everything displayed reads `view`; edits (current HP, macro and adjustment choices) go to `data`.
+const view = computed(() => applyAdjustments(data.value));
 
 // The shape currently shown in the sheet, tracked separately from the DataBlock above
 // because the tracker API is keyed by LocalId, not by the GlobalId the DataBlock uses.
@@ -157,8 +178,8 @@ function setWidth(w: WidthKey): void {
     }
 }
 
-const BASE_TABS = ["Core", "Combat", "Skills", "Feats & Spells", "Specials", "Inventory"] as const;
-const LIMITED_TABS = ["Core", "Combat", "Skills", "Specials"] as const;
+const BASE_TABS = ["Core", "Combat", "Skills", "Adjustments", "Feats & Spells", "Specials", "Inventory"] as const;
+const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Specials"] as const;
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Core");
 
@@ -244,6 +265,10 @@ async function onFileSelected(event: Event): Promise<void> {
         // re-imports (dropping any skill the new export no longer has).
         const skillNames = new Set(character.skills.map((s) => s.name));
         character.macroSkills = (data.value.macroSkills ?? []).filter((n) => skillNames.has(n));
+        // Likewise the adjustments: what's switched on is the table's state, not Hero Lab's.
+        character.adjustments = JSON.parse(
+            JSON.stringify(data.value.adjustments ?? { enabled: [], custom: [] }),
+        ) as AdjustmentState;
         const attackNames = new Set(character.combat.attacks.map((a) => a.name));
         character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
@@ -356,6 +381,80 @@ function applyMacroChange(name: string, on: boolean): void {
     macroStatus.value = text || `${name}: ${on ? "added to" : "removed from"} the dice macros.`;
     clearTimeout(macroStatusTimeout);
     macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+}
+
+// --- Adjustments (buffs, conditions) ---------------------------------------------------------------
+
+const ADJUSTMENT_GROUPS = ["Spells", "Class abilities", "Combat", "Conditions"] as const;
+const adjustmentGroups = ADJUSTMENT_GROUPS.map((group) => ({
+    group,
+    items: BUILTIN_ADJUSTMENTS.filter((a) => a.group === group),
+}));
+const activeAdjustmentNames = computed(() => enabledAdjustments(data.value).map((a) => a.name));
+
+function adjustmentState(): AdjustmentState {
+    data.value.adjustments ??= { enabled: [], custom: [] };
+    return data.value.adjustments;
+}
+
+function isAdjustmentOn(key: string): boolean {
+    return (data.value.adjustments?.enabled ?? []).includes(key);
+}
+
+/** Saves the adjustments and re-exports Custom Data, so the numbers, rolls and dice macros follow. */
+function applyAdjustmentChange(message: string): void {
+    save();
+    const id = currentLocalId.value;
+    let text = "";
+    if (id !== undefined) {
+        try {
+            text = syncCustomData(api, id, buildElements(data.value)).summary;
+        } catch (e) {
+            console.error("[pf1e-sheet] Custom Data export after an adjustment change failed", e);
+            text = "Custom Data export failed - see the console.";
+        }
+    }
+    macroStatus.value = text ? `${message} ${text}` : message;
+    clearTimeout(macroStatusTimeout);
+    macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+}
+
+function toggleAdjustment(key: string, name: string, on: boolean): void {
+    const state = adjustmentState();
+    state.enabled = state.enabled.filter((k) => k !== key);
+    if (on) state.enabled.push(key);
+    applyAdjustmentChange(`${name} ${on ? "on" : "off"}.`);
+}
+
+const newAdjName = ref("");
+const newAdjEffects = ref<AdjustmentEffect[]>([{ target: "attack", type: "untyped", value: 1 }]);
+const ADJUSTMENT_TARGETS = Object.keys(TARGET_LABELS) as AdjustmentTarget[];
+
+function addNewEffectRow(): void {
+    newAdjEffects.value.push({ target: "attack", type: "untyped", value: 1 });
+}
+
+function addCustomAdjustment(): void {
+    const name = newAdjName.value.trim();
+    const effects = newAdjEffects.value.filter((e) => Number.isFinite(e.value) && e.value !== 0);
+    if (!name || !effects.length) {
+        macroStatus.value = "Give the adjustment a name and at least one non-zero effect.";
+        return;
+    }
+    const state = adjustmentState();
+    const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    state.custom.push({ id, name, effects: effects.map((e) => ({ ...e })) });
+    state.enabled.push(id);
+    newAdjName.value = "";
+    newAdjEffects.value = [{ target: "attack", type: "untyped", value: 1 }];
+    applyAdjustmentChange(`${name} added and switched on.`);
+}
+
+function removeCustomAdjustment(id: string, name: string): void {
+    const state = adjustmentState();
+    state.custom = state.custom.filter((a) => a.id !== id);
+    state.enabled = state.enabled.filter((k) => k !== id);
+    applyAdjustmentChange(`${name} removed.`);
 }
 
 /** Removes every Custom Data element this sheet wrote; elements you made by hand are untouched. */
@@ -537,7 +636,7 @@ function rollAttack(i: number, n: number): void {
 
 /** The button text for one iterative attack: its bonus, "+13". */
 function attackBonusLabel(i: number, n: number): string {
-    const bonus = iterativeBonuses(data.value.combat.attacks[i]?.bonus ?? "")[n];
+    const bonus = iterativeBonuses(view.value.combat.attacks[i]?.bonus ?? "")[n];
     if (bonus === undefined) return "Atk";
     return bonus < 0 ? `${bonus}` : `+${bonus}`;
 }
@@ -572,8 +671,8 @@ const abilityRows = computed(() =>
     (["str", "dex", "con", "int", "wis", "cha"] as const).map((key) => ({
         key,
         label: key.toUpperCase(),
-        score: data.value.abilities[key],
-        mod: abilityModifier(data.value.abilities[key]),
+        score: view.value.abilities[key],
+        mod: abilityModifier(view.value.abilities[key]),
     })),
 );
 
@@ -599,6 +698,9 @@ function fmt(n: number): string {
         <div v-if="importNotes" class="imported-at">{{ importNotes }}</div>
         <div class="readonly-note">
             All fields except current HP are read-only - update the character in Hero Lab and re-import to change them.
+        </div>
+        <div v-if="activeAdjustmentNames.length" class="adjusted-note">
+            Adjusted: {{ activeAdjustmentNames.join(", ") }} - the numbers and rolls below include them.
         </div>
         <div class="roll-bar">
             <span class="roll-mode">
@@ -683,7 +785,7 @@ function fmt(n: number): string {
             <div class="abilities">
                 <div v-for="row of abilityRows" :key="row.key" class="ability">
                     <div class="label">{{ row.label }}</div>
-                    <div class="score">{{ data.abilities[row.key] }}</div>
+                    <div class="score">{{ view.abilities[row.key] }}</div>
                     <div class="mod">{{ fmt(row.mod) }}</div>
                     <button
                         type="button"
@@ -768,43 +870,43 @@ function fmt(n: number): string {
                         @change="onHpCommitted"
                     />
                     /
-                    <span class="val">{{ data.combat.hp.max }}</span>
+                    <span class="val">{{ view.combat.hp.max }}</span>
                 </label>
                 <label
                     >Nonlethal
-                    <span class="val">{{ data.combat.hp.nonlethal }}</span>
+                    <span class="val">{{ view.combat.hp.nonlethal }}</span>
                 </label>
                 <label
                     >Speed
-                    <span class="val">{{ data.combat.speed }}</span>
+                    <span class="val">{{ view.combat.speed }}</span>
                 </label>
                 <label
                     >AC
-                    <span class="val">{{ data.combat.ac.normal }}</span>
+                    <span class="val">{{ view.combat.ac.normal }}</span>
                 </label>
                 <label
                     >Touch
-                    <span class="val">{{ data.combat.ac.touch }}</span>
+                    <span class="val">{{ view.combat.ac.touch }}</span>
                 </label>
                 <label
                     >Flat-Footed
-                    <span class="val">{{ data.combat.ac.flatFooted }}</span>
+                    <span class="val">{{ view.combat.ac.flatFooted }}</span>
                 </label>
                 <label
                     >BAB
-                    <span class="val">{{ data.combat.bab }}</span>
+                    <span class="val">{{ view.combat.bab }}</span>
                 </label>
                 <label
                     >CMB
-                    <span class="val">{{ data.combat.cmb }}</span>
+                    <span class="val">{{ view.combat.cmb }}</span>
                 </label>
                 <label
                     >CMD
-                    <span class="val">{{ data.combat.cmd }}</span>
+                    <span class="val">{{ view.combat.cmd }}</span>
                 </label>
                 <label
                     >Initiative
-                    <span class="val">{{ data.combat.initiative }}</span>
+                    <span class="val">{{ view.combat.initiative }}</span>
                 </label>
             </div>
 
@@ -812,15 +914,15 @@ function fmt(n: number): string {
             <div class="grid-3">
                 <label
                     >Fort
-                    <span class="val">{{ data.combat.saves.fort.total }}</span>
+                    <span class="val">{{ view.combat.saves.fort.total }}</span>
                 </label>
                 <label
                     >Reflex
-                    <span class="val">{{ data.combat.saves.ref.total }}</span>
+                    <span class="val">{{ view.combat.saves.ref.total }}</span>
                 </label>
                 <label
                     >Will
-                    <span class="val">{{ data.combat.saves.will.total }}</span>
+                    <span class="val">{{ view.combat.saves.will.total }}</span>
                 </label>
             </div>
 
@@ -844,7 +946,7 @@ function fmt(n: number): string {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="(atk, i) of data.combat.attacks" :key="i">
+                        <tr v-for="(atk, i) of view.combat.attacks" :key="i">
                             <td>
                                 <span class="val">{{ atk.name }}</span>
                             </td>
@@ -915,7 +1017,7 @@ function fmt(n: number): string {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="(skill, i) of data.skills" :key="i">
+                        <tr v-for="(skill, i) of view.skills" :key="i">
                             <td>{{ skill.name }}</td>
                             <td>{{ skill.ability.toUpperCase() }}</td>
                             <td>
@@ -947,6 +1049,61 @@ function fmt(n: number): string {
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <div v-else-if="activeTab === 'Adjustments'" class="pf1e-panel">
+            <div class="readonly-note">
+                Ticked adjustments are added to this sheet's numbers, its roll buttons and the token's dice macros,
+                following PF1 stacking (same-type bonuses don't stack; dodge, circumstance and untyped do). Export from
+                Hero Lab with its own adjustments switched <strong>off</strong>, or they count twice.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
+
+            <template v-for="g of adjustmentGroups" :key="g.group">
+                <h4>{{ g.group }}</h4>
+                <div class="adjustment-list">
+                    <label v-for="adj of g.items" :key="adj.key" class="adjustment">
+                        <input
+                            type="checkbox"
+                            :checked="isAdjustmentOn(adj.key)"
+                            @change="toggleAdjustment(adj.key, adj.name, ($event.target as HTMLInputElement).checked)"
+                        />
+                        <span class="adj-name">{{ adj.name }}</span>
+                        <span class="adj-effects">{{ describeEffects(adj.effects, adj.extraAttack) }}</span>
+                    </label>
+                </div>
+            </template>
+
+            <h4>Custom</h4>
+            <div v-if="data.adjustments?.custom.length" class="adjustment-list">
+                <div v-for="adj of data.adjustments.custom" :key="adj.id" class="adjustment">
+                    <input
+                        type="checkbox"
+                        :checked="isAdjustmentOn(adj.id)"
+                        @change="toggleAdjustment(adj.id, adj.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    <span class="adj-name">{{ adj.name }}</span>
+                    <span class="adj-effects">{{ describeEffects(adj.effects) }}</span>
+                    <button type="button" @click="removeCustomAdjustment(adj.id, adj.name)">Remove</button>
+                </div>
+            </div>
+            <div class="custom-adjustment-form">
+                <input v-model="newAdjName" type="text" placeholder="Name, e.g. Aid or Weapon Focus" />
+                <div v-for="(eff, i) of newAdjEffects" :key="i" class="effect-row">
+                    <input v-model.number="eff.value" type="number" class="effect-value" />
+                    <select v-model="eff.type">
+                        <option v-for="t of BONUS_TYPES" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                    <select v-model="eff.target">
+                        <option v-for="t of ADJUSTMENT_TARGETS" :key="t" :value="t">{{ TARGET_LABELS[t] }}</option>
+                    </select>
+                    <button v-if="newAdjEffects.length > 1" type="button" @click="newAdjEffects.splice(i, 1)">✕</button>
+                </div>
+                <div class="hp-push-row">
+                    <button type="button" @click="addNewEffectRow">Add effect</button>
+                    <button type="button" @click="addCustomAdjustment">Add adjustment</button>
+                </div>
             </div>
         </div>
 
@@ -1170,6 +1327,54 @@ function fmt(n: number): string {
         white-space: pre-wrap;
         overflow: auto;
         resize: vertical;
+    }
+
+    .adjusted-note {
+        color: #8a4b00;
+        font-size: 0.8rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .adjustment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        margin-bottom: 0.4rem;
+    }
+
+    .adjustment {
+        display: flex;
+        align-items: baseline;
+        gap: 0.4rem;
+        font-size: 0.85rem;
+
+        .adj-name {
+            flex: 0 0 auto;
+            font-weight: bold;
+        }
+
+        .adj-effects {
+            flex: 1 1 auto;
+            color: #555;
+            font-size: 0.75rem;
+        }
+    }
+
+    .custom-adjustment-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        margin-top: 0.3rem;
+
+        .effect-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+
+        .effect-value {
+            width: 4rem;
+        }
     }
 
     .readonly-note {

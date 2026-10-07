@@ -33,6 +33,7 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
 - `src/trackers.ts` — HP tracker sync
 - `src/auras.ts` — auras from Hero Lab senses and auras
+- `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 
 ## Importing from Hero Lab
@@ -65,16 +66,47 @@ Known limitations:
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
 monster or NPC from Hero Lab the same way as a character and import it on the token. It works like the
 full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
-macros) but only has four tabs:
+macros) but only has five tabs:
 
 - **Core**: race, size, classes, ability scores with check rolls, auras and the Custom Data buttons
 - **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
 - **Skills**: skills with roll buttons and the Macro column
+- **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
 - **Specials**: Hero Lab's special abilities
 
 The header shows "Monster / NPC" to tell the two apart. HP changes made on the token's tracker flow
 back to the sheet as for characters; changing HP on a token that has no imported sheet never creates
 one.
+
+## Adjustments
+
+The **Adjustments** tab switches buffs and conditions on and off, like Hero Lab's Adjust tab. Hero
+Lab's own adjustments can't be read from its XML export (only their combined result is in the numbers),
+so **export from Hero Lab with its adjustments switched off** and switch them on here instead,
+otherwise they count twice.
+
+- **Built-in:** Bless, Prayer, Haste, Heroism, Greater Heroism, Good Hope, Divine Favor (+1), Shield
+  of Faith (+2), Holy Aura, Mage Armor, Shield, Barkskin (+2), the six ability buffs (Bull's Strength,
+  Cat's Grace, ...), Enlarge Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting
+  Defensively, Shaken, Sickened and Fatigued.
+- **Custom:** a name and one or more effects (amount, bonus type, what it changes: an ability score,
+  attack, melee or ranged attack, damage, AC, saves, skills, initiative, CMD or speed). New ones are
+  switched on straight away.
+
+Enabled adjustments are applied to everything the sheet shows and rolls, and to the token's dice
+macros (Custom Data is re-exported on every change). A line under the header lists what's on.
+Bonuses follow PF1 stacking: same-type bonuses don't stack (only the highest counts), while dodge,
+circumstance and untyped bonuses do, and penalties always add up. AC bonuses land on touch and
+flat-footed AC by type (armor, shield and natural don't apply to touch AC; dodge doesn't apply when
+flat-footed). An ability change carries through to what it feeds: Str to melee attack, melee damage,
+CMB, CMD and Str skills; Dex to ranged attack, AC, Reflex, initiative, CMD and Dex skills; Con to Fort;
+Wis to Will; and every ability to its skills. Haste adds one extra attack at the highest bonus.
+
+The choices are stored with the character, shared with the table and kept when you re-import.
+
+Not modelled: HP from Con changes, x1.5 Str on two-handed damage, situational parts ("+2 vs fear"),
+and spells whose bonus scales with caster level beyond the listed value (add a custom one). Weapons
+from imports made before this version count as melee until the character is re-imported.
 
 ## HP tracker
 
