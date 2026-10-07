@@ -384,7 +384,7 @@ const SHAPE_DATA_RE = /aura|tracker|custom|variant/i;
 
 function sectionShape(api: unknown, shapeId: number | undefined): string[] {
     const lines = ["## shape (the runtime shape object)"];
-    if (shapeId === undefined) return [...lines, "(no current shape id - open a character first)"];
+    if (shapeId === undefined) return [...lines, "(no current shape id - open a token's sheet first)"];
     const getShape = get(api, "getShape");
     if (typeof getShape !== "function") return [...lines, "api.getShape is not a function"];
     const shape = safe(() => getShape.call(api, shapeId) as unknown, undefined);
@@ -484,6 +484,8 @@ const REQUIRED_API: [path: string, usedFor: string][] = [
     ["getShape", "tab filter, tracker sync"],
     ["getGlobalId", "Custom Data, DataBlock"],
     ["getOrLoadDataBlock", "tracker -> sheet HP"],
+    ["getDataBlock", "tracker -> monster/NPC sheet HP"],
+    ["loadDataBlock", "tracker -> monster/NPC sheet HP"],
     ["eventBus.on", "tracker -> sheet HP"],
     ["systems.trackers.getAll", "HP tracker"],
     ["systems.trackers.get", "HP tracker"],
@@ -591,8 +593,9 @@ export async function buildHealthCheck(
         );
         ok(`token name: ${safeStringify(get(props, "name"))}`);
         const shape = safe(() => callM(api, "getShape", shapeId), undefined);
-        if (get(shape, "character") === undefined) bad("token is not marked as a character");
-        else ok(`character id: ${safeStringify(get(shape, "character"))}`);
+        // Not a problem: any other token gets the limited (monster / NPC) sheet.
+        if (get(shape, "character") === undefined) ok("not a character: limited monster / NPC sheet");
+        else ok(`character id: ${safeStringify(get(shape, "character"))} (full sheet)`);
     });
 
     await section("Sheet data", () => {
@@ -954,4 +957,10 @@ export function exposeDebugHandle(api: unknown, getShapeId: () => number | undef
         apiDump: () => buildApiDump(api, getShapeId()),
         state: diagState,
     };
+}
+
+/** Undoes `exposeDebugHandle` (the mod's `dispose`). */
+export function removeDebugHandle(): void {
+    delete (window as unknown as Dict).pf1eApi;
+    delete (window as unknown as Dict).pf1eDiag;
 }

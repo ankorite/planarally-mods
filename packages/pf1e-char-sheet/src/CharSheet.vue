@@ -2,6 +2,7 @@
 import type { LocalId } from "@planarally/mod-api";
 import { ref, watch, computed, onBeforeUnmount } from "vue";
 
+import { isCharacterShape, isDm as viewerIsDm } from "./access";
 import { syncAuras } from "./auras";
 import {
     attackFormula,
@@ -58,18 +59,23 @@ function refreshLease(): void {
 
 onBeforeUnmount(() => releaseLease?.());
 
+// The sheet shows the focused shape: the token whose edit dialog this tab is in. (Not the active
+// character: a monster/NPC token isn't a character, and the active character needn't be the token
+// being edited.)
 watch(
-    () => api.systemsState.characters.reactive.activeCharacterId,
-    async (charId) => {
-        if (charId !== undefined) {
-            const shapeId = api.systems.characters.getShapeId(charId);
-            if (shapeId) load(shapeId);
-            currentLocalId.value = api.systems.characters.getShape(charId)?.id;
-            refreshLease();
-        }
+    () => api.systemsState.selected.reactive.focus,
+    (shape) => {
+        if (shape === undefined) return;
+        load(shape);
+        currentLocalId.value = shape;
+        refreshLease();
     },
     { immediate: true },
 );
+
+// A character gets the full sheet; any other token (monsters, NPCs - the tab only shows for the DM)
+// gets the limited one: combat, skills and specials.
+const isCharacter = computed(() => currentLocalId.value !== undefined && isCharacterShape(api, currentLocalId.value));
 
 const pushStatus = ref("");
 let pushStatusTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -107,7 +113,7 @@ function onHpCommitted(): void {
 /** The "Push HP to tracker" button: same push, but creates the tracker if the token has none. */
 function manualPushHp(): void {
     if (currentLocalId.value === undefined) {
-        flashPushStatus("No character selected.");
+        flashPushStatus("No token selected.");
         return;
     }
     try {
@@ -152,28 +158,28 @@ function setWidth(w: WidthKey): void {
 }
 
 const BASE_TABS = ["Core", "Combat", "Skills", "Feats & Spells", "Specials", "Inventory"] as const;
-const ALL_TABS = [...BASE_TABS, "Diagnostics"] as const;
-type TabName = (typeof ALL_TABS)[number];
+const LIMITED_TABS = ["Combat", "Skills", "Specials"] as const;
+type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Core");
 
-// The Diagnostics tab (read-only reports on the sheet and PlanarAlly's mod API) is for the DM
-// only. `isDm` / `isFakePlayer` live on PlanarAlly's game state but aren't in the published types.
+// The Diagnostics tab (read-only reports on the sheet and PlanarAlly's mod API) is for the DM only.
 // A DM who has switched to "fake player" (to preview what players see) gets the player view, i.e.
 // no Diagnostics tab either.
-const isDm = computed(() => {
-    const game = (
-        api.systemsState as unknown as {
-            game?: { reactive?: { isDm?: boolean; isFakePlayer?: boolean } };
-        }
-    ).game;
-    return game?.reactive?.isDm === true && game.reactive.isFakePlayer !== true;
+const isDm = computed(() => viewerIsDm(api));
+const visibleTabs = computed<readonly TabName[]>(() => {
+    const tabs: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
+    return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
-const visibleTabs = computed<readonly TabName[]>(() => (isDm.value ? ALL_TABS : BASE_TABS));
 
-// If the DM role goes away while Diagnostics is open (e.g. switching to fake player), leave it.
-watch(isDm, (dm) => {
-    if (!dm && activeTab.value === "Diagnostics") activeTab.value = "Core";
-});
+// Keep the open tab valid when the sheet switches between a character and a monster/NPC, or the DM
+// role goes away while Diagnostics is open (e.g. switching to fake player).
+watch(
+    visibleTabs,
+    (tabs) => {
+        if (!tabs.includes(activeTab.value)) activeTab.value = tabs[0] ?? "Combat";
+    },
+    { immediate: true },
+);
 
 // --- Diagnostics (see diagnostics.ts) ------------------------------------------------------
 // Each report replaces the previous one; Copy puts it on the clipboard for a bug report.
@@ -299,7 +305,7 @@ function flashCd(text: string): void {
 /** Writes the sheet's numbers and ready-made rolls into the token's Custom Data (our source only). */
 function exportCustomData(): void {
     const id = currentLocalId.value;
-    if (id === undefined) return flashCd("No character selected.");
+    if (id === undefined) return flashCd("No token selected.");
     try {
         const result = syncCustomData(api, id, buildElements(data.value));
         flashCd(result.summary || "Custom Data is already up to date.");
@@ -355,7 +361,7 @@ function applyMacroChange(name: string, on: boolean): void {
 /** Removes every Custom Data element this sheet wrote; elements you made by hand are untouched. */
 function clearCustomData(): void {
     const id = currentLocalId.value;
-    if (id === undefined) return flashCd("No character selected.");
+    if (id === undefined) return flashCd("No token selected.");
     try {
         const result = removeCustomData(api, id);
         flashCd(result.summary || "Nothing from the sheet to remove.");
@@ -373,7 +379,7 @@ function resyncAuras(): void {
     const id = currentLocalId.value;
     let text: string;
     if (id === undefined) {
-        text = "No character selected.";
+        text = "No token selected.";
     } else {
         try {
             const current = data.value.auras ?? [];
@@ -579,7 +585,10 @@ function fmt(n: number): string {
 <template>
     <div id="pf1e-sheet" :style="widthStyle">
         <div class="pf1e-header">
-            <div class="char-name">{{ data.identity.name || "Unnamed character" }}</div>
+            <div class="char-name">
+                {{ data.identity.name || (isCharacter ? "Unnamed character" : "Unnamed creature") }}
+                <span v-if="!isCharacter" class="sheet-kind">Monster / NPC</span>
+            </div>
             <button type="button" @click="triggerImport">Import from Hero Lab…</button>
             <input ref="fileInput" type="file" accept=".xml" style="display: none" @change="onFileSelected" />
         </div>
@@ -1117,6 +1126,15 @@ function fmt(n: number): string {
             min-width: 0;
             font-size: 1.05rem;
             font-weight: bold;
+        }
+
+        .sheet-kind {
+            margin-left: 0.4rem;
+            font-size: 0.7rem;
+            font-weight: normal;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
 
         button {

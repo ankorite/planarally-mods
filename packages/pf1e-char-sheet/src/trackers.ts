@@ -1,9 +1,10 @@
-import type { GameApi, LocalId } from "@planarally/mod-api";
+import type { GameApi, LocalId, Sync, Tracker, TrackerId } from "@planarally/mod-api";
 
-// HP <-> tracker sync. PlanarAlly's tracker system has add / getAll / get / update / remove, and PA
-// announces changes on `api.eventBus` ("tracker:added" / "tracker:updated" / "tracker:removed"),
-// emitted AFTER the change has been applied. The system is reached through the narrow interface
-// below and checked at runtime, so a server without these functions degrades gracefully.
+// HP <-> tracker sync. The tracker system is typed by @planarally/mod-api (get / update / remove, and
+// "tracker:added" / "tracker:updated" / "tracker:removed" on `api.eventBus`, emitted AFTER the change
+// has been applied). Finding the HP tracker by name on any token, and creating one, also need `getAll`
+// and `add`: PlanarAlly has them at runtime but the published types don't list them yet, so they are
+// checked before use and a server without them degrades gracefully.
 
 /** The HP tracker is matched by name (case-insensitive) so it also adopts a hand-made one. */
 export const HP_TRACKER_NAME = "hp";
@@ -12,36 +13,22 @@ export function isHpTrackerName(name: unknown): boolean {
     return typeof name === "string" && name.trim().toLowerCase() === HP_TRACKER_NAME;
 }
 
-interface Sync {
-    ui: boolean;
-    server: boolean;
+/** A tracker as listed by `getAll`; `temporary` is only set on records PA's UI created. */
+export type ListedTracker = Tracker & { temporary?: boolean };
+
+/** The runtime-only tracker functions the published types don't list (yet). */
+interface TrackerExtras {
+    getAll(shape: LocalId): ListedTracker[];
+    add(shape: LocalId, tracker: Tracker & { temporary: boolean }, sync: Sync): void;
 }
 
-/** A tracker record as stored by PA. `temporary` is only set on records the UI created. */
-export interface RealTracker {
-    uuid: string;
-    name: string;
-    value: number;
-    maxvalue: number;
-    visible: boolean;
-    draw: boolean;
-    primaryColor: string;
-    secondaryColor: string;
-    temporary?: boolean;
-}
+type FullTrackerSystem = GameApi["systems"]["trackers"] & TrackerExtras;
 
-interface RealTrackerSystem {
-    getAll(shape: number): RealTracker[];
-    get(shape: number, uuid: string): RealTracker | undefined;
-    add(shape: number, tracker: RealTracker, sync: Sync): void;
-    update(shape: number, uuid: string, delta: Partial<RealTracker>, sync: Sync): void;
-}
-
-/** The real tracker system, or undefined if this server doesn't have the methods we need. */
-export function realTrackers(api: GameApi): RealTrackerSystem | undefined {
-    const t = api.systems.trackers as unknown as Partial<RealTrackerSystem>;
+/** The tracker system with `getAll` / `add`, or undefined if this server doesn't have them. */
+export function realTrackers(api: GameApi): FullTrackerSystem | undefined {
+    const t = api.systems.trackers as GameApi["systems"]["trackers"] & Partial<TrackerExtras>;
     const ok = typeof t.getAll === "function" && typeof t.add === "function" && typeof t.update === "function";
-    return ok ? (t as RealTrackerSystem) : undefined;
+    return ok ? (t as FullTrackerSystem) : undefined;
 }
 
 export function newUuid(): string {
@@ -57,7 +44,7 @@ export function newUuid(): string {
     });
 }
 
-export function findHpTracker(api: GameApi, shape: LocalId): RealTracker | undefined {
+export function findHpTracker(api: GameApi, shape: LocalId): ListedTracker | undefined {
     return realTrackers(api)
         ?.getAll(shape)
         .find((t) => isHpTrackerName(t.name));
@@ -90,7 +77,7 @@ export function pushHp(
     trackers.add(
         shape,
         {
-            uuid: newUuid(),
+            uuid: newUuid() as TrackerId,
             name: "HP",
             value: current,
             maxvalue: max,
@@ -104,13 +91,4 @@ export function pushHp(
         sync,
     );
     return "created";
-}
-
-/** Subscribes to a PA event-bus event. Returns false if this server has no usable event bus. */
-export function subscribeToBus(api: GameApi, event: string, cb: (payload: unknown) => void): boolean {
-    const bus = (api as unknown as { eventBus?: { on?: (name: string, cb: (payload: unknown) => void) => unknown } })
-        .eventBus;
-    if (!bus || typeof bus.on !== "function") return false;
-    bus.on(event, cb);
-    return true;
 }

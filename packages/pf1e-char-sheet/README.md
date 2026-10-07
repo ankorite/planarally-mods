@@ -2,6 +2,7 @@
 
 A PlanarAlly mod that adds a Pathfinder 1st Edition character sheet tab to shapes marked as
 characters, with one-click import from a Hero Lab XML export (File > Custom Output > Export XML).
+For the DM, any other token gets a limited sheet for monsters and NPCs.
 
 Hero Lab is the source of truth: the sheet is read-only except for current HP. Edit the character in
 Hero Lab, re-export and re-import to update the sheet, and only adjust current HP in PlanarAlly
@@ -23,8 +24,10 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 
 - `mod.toml` — mod manifest
 - `src/main.ts` — entry point: registers the shape tab and the tracker → sheet HP sync
+- `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
-- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Feats & Spells / Specials / Inventory tabs)
+- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Feats & Spells / Specials / Inventory tabs,
+  or Combat / Skills / Specials for a monster/NPC)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -56,6 +59,21 @@ Known limitations:
 - Prepared casters' memorized spells have only been tested with empty slots.
 - Archetypes are kept as part of the class name (`"Oracle (Dual-Cursed Oracle)"`), as Hero Lab exports them.
 - Only the first `<character>` in a file is imported.
+
+## Monsters and NPCs
+
+A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
+monster or NPC from Hero Lab the same way as a character and import it on the token. It works like the
+full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
+macros) but only has three tabs:
+
+- **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
+- **Skills**: skills with roll buttons and the Macro column
+- **Specials**: Hero Lab's special abilities
+
+The header shows "Monster / NPC" to tell the two apart. HP changes made on the token's tracker flow
+back to the sheet as for characters; changing HP on a token that has no imported sheet never creates
+one.
 
 ## HP tracker
 
@@ -142,7 +160,9 @@ feet.
 
 ## Who sees what
 
-- **The sheet tab** only appears on characters the viewer can edit; the DM can always see it.
+- **The full sheet** only appears on characters the viewer can edit; the DM can always see it.
+- **The limited sheet** (monsters and NPCs) appears on every other token, for the DM only. A DM
+  previewing as a "fake player" doesn't see it.
 - **The Diagnostics tab** is DM-only.
 
 ## Diagnostics
