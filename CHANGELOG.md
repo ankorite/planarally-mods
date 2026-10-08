@@ -2,6 +2,17 @@
 
 ## [2026-10-07]
 
+- pf1e-char-sheet v0.21.0:
+    - trackers for every x/day and x/round ability (Hero Lab's tracked resources) and for spell slots
+      per day, created on import and kept in step on re-import without touching current values
+    - Spells tab of its own, only when there are spells, with DC, range and duration
+    - spell dice macros: a Macro toggle per spell with a formula guessed from the spell's text (editable)
+    - fixed: spells without a spell class (e.g. a monster's racial spellcasting) were dropped on import
+    - update check: the DM sees a message on the sheet when a newer version is on GitHub
+    - Duplicate token button on the monster/NPC sheet: copies the token (PlanarAlly's own copy & paste)
+      with its sheet, trackers, auras and dice macros
+    - Track checkboxes on the Specials tab switch individual ability trackers off and on
+
 - pf1e-char-sheet v0.20.0:
     - limited sheet for monsters and NPCs: any token that isn't a character gets a DM-only sheet with
       Core, Combat, Skills, Adjustments and Specials tabs, filled from a Hero Lab import

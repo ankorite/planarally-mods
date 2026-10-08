@@ -26,15 +26,20 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/main.ts` — entry point: registers the shape tab and the tracker → sheet HP sync
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
-- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Feats & Spells / Specials / Inventory tabs,
-  or Core / Combat / Skills / Specials for a monster/NPC)
+- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Adjustments / Feats / Spells / Specials /
+  Inventory tabs, or Core / Combat / Skills / Adjustments / Spells / Specials for a monster/NPC; Spells only
+  when there are spells)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
 - `src/trackers.ts` — HP tracker sync
 - `src/auras.ts` — auras from Hero Lab senses and auras
+- `src/resources.ts` — trackers for x/day and x/round abilities and spell slots
+- `src/spells.ts` — spell dice macros and the formula guessed from a spell's text
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
+- `src/updates.ts` — checks GitHub for a newer version of the mod
+- `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
 
@@ -45,12 +50,16 @@ On import the sheet is filled with:
 - melee and ranged attacks
 - skills (ranks, class-skill flag, trained-only, total)
 - feats and spells, with a short excerpt inline and the full rules text on hover (ⓘ)
-- spellcasting per class (caster level, concentration, slots/day, known spells), grouped by spell level
+- spellcasting per class (caster level, concentration, slots/day, known spells with DC, range and
+  duration), grouped by spell level; spells without a spell class, such as a monster's racial
+  spellcasting, get their own group
+- limited-use abilities (Hero Lab's tracked resources: every x/day and x/round ability)
 - specials (senses, auras, defensive/offensive abilities, spell-like abilities, items, ...)
 - inventory (magic items and gear, with quantity / weight / cost)
 
 After a successful import the token is renamed to the character's name, the HP tracker is
-created or updated, auras are created, and the sheet is exported to Custom Data.
+created or updated, the x/day, x/round and spell-slot trackers and the auras are created, and the
+sheet is exported to Custom Data.
 
 Only the character's own data is read: a nested minion (animal companion, eidolon, mount) is never
 mixed into the character's stats or lists.
@@ -66,13 +75,22 @@ Known limitations:
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
 monster or NPC from Hero Lab the same way as a character and import it on the token. It works like the
 full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
-macros) but only has five tabs:
+macros) but only has these tabs:
 
 - **Core**: race, size, classes, ability scores with check rolls, auras and the Custom Data buttons
 - **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
 - **Skills**: skills with roll buttons and the Macro column
 - **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
+- **Spells**: only when it has spells, as on the full sheet (see Spells)
 - **Specials**: Hero Lab's special abilities
+
+**Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
+encounter with five orcs from one import. The mod API can't create tokens, so it uses PlanarAlly's own
+copy & paste (it selects the token and presses Ctrl+C, Ctrl+V for you; Cmd on a Mac): the copy has the
+same image, size, name, HP, trackers, auras and dice macros, lands on the current layer just offset from
+the original, and is selected afterwards. The sheet data is copied to it, pointing at the copy's own
+trackers and auras, so each token tracks its own HP and uses. It replaces whatever was on PlanarAlly's
+shape clipboard.
 
 The header shows "Monster / NPC" to tell the two apart. HP changes made on the token's tracker flow
 back to the sheet as for characters; changing HP on a token that has no imported sheet never creates
@@ -107,6 +125,46 @@ The choices are stored with the character, shared with the table and kept when y
 Not modelled: HP from Con changes, x1.5 Str on two-handed damage, situational parts ("+2 vs fear"),
 and spells whose bonus scales with caster level beyond the listed value (add a custom one). Weapons
 from imports made before this version count as melee until the character is re-imported.
+
+## Spells
+
+The **Spells** tab lists each spellcasting class (caster level, concentration, slots per day) with its
+spells grouped by level. Each spell shows its DC (hover for the save), range and duration under its
+name, a short excerpt, and the full rules text on hover (ⓘ).
+It only appears when the character or creature has spells.
+
+Each spell has a **Macro** checkbox, a formula and a **Roll** button. Hero Lab doesn't export a spell's
+dice as data, only its rules text, so the formula is guessed from that text at the spell's caster
+level, e.g. at caster level 7:
+
+- "1d6 points of fire damage per caster level (maximum 10d6)" → `7d6`
+- "cures 1d8 points of damage + 1 point per caster level (maximum +5)" → `1d8+5`
+- "1d6 points of damage per two caster levels (maximum 5d6)" → `3d6`
+
+Only dice that deal damage or heal count ("lingers 1d6 rounds" doesn't). Edit the formula if the guess
+is wrong or missing; clear the field to go back to the guess. Ticked spells with a formula become
+`Cast <spell>` dice macros. The choices and edited formulas are saved with the character and kept when
+you re-import.
+
+## Trackers for limited-use abilities
+
+Hero Lab exports every x/day and x/round ability as a tracked resource ("Darkness (3/day)", "Bardic
+Performance (20 rounds/day)"). Each becomes a PlanarAlly tracker on the token, as does each spell
+level's slots per day ("Oracle level 1 slots"), so uses can be ticked off in play. They're created on
+import and with **Create / update trackers on the token** on the Core tab, which lists them.
+
+- New trackers start at the uses left in the Hero Lab export.
+- Re-importing never refills or overwrites a tracker's current value. It updates the maximum, follows
+  Hero Lab's name ("20 rounds/day" → "22 rounds/day") unless you renamed the tracker, creates missing
+  ones and removes the ones it made for abilities that are gone.
+- An ability the sheet doesn't manage yet adopts an existing tracker with exactly its name instead of
+  adding a second one. Other hand-made trackers, and the HP tracker, are never touched.
+- They aren't drawn as bars on the token. On a character they're visible to everyone; on a monster
+  or NPC only the DM sees them.
+- Each one can be switched off with its **Track** checkbox on the Specials tab, next to the ability
+  (spell slots and anything else without a matching special are listed under "Other trackers").
+  Unticking removes the tracker from the token; ticking adds it back. The choice is kept when you
+  re-import.
 
 ## HP tracker
 
@@ -166,6 +224,8 @@ What is written:
       table; its sheet buttons keep working either way.
     - `Roll <skill>` for each skill ticked in the **Macro** column of the Skills tab. The choice is
       saved with the character and kept when you re-import (as is the attack choice).
+    - `Cast <spell>` for each spell ticked in the **Macro** column of the Spells tab, with its formula
+      (see Spells).
 
 PlanarAlly lists every roll macro in the **Dice Macros** panel of its dice prompt while the token is
 selected; click one and press Enter to roll it. Only these rolls are macros: everything else is a
@@ -197,6 +257,7 @@ feet.
 - **The limited sheet** (monsters and NPCs) appears on every other token, for the DM only. A DM
   previewing as a "fake player" doesn't see it.
 - **The Diagnostics tab** is DM-only.
+- **The update message** (a newer version on GitHub) is DM-only.
 
 ## Diagnostics
 
@@ -208,6 +269,18 @@ The DM-only **Diagnostics** tab has two read-only reports to copy into a bug rep
   the top.
 - **Full API dump**: everything PlanarAlly's mod API exposes, plus a scan of PlanarAlly's own code
   for hook and event names. It is large; use it when a PlanarAlly update breaks something.
+
+## Update check
+
+When the DM opens a sheet, the mod reads the `version` in this package's `mod.toml` on the repository's
+`main` branch (from `raw.githubusercontent.com`) and compares it with the installed version. If GitHub's
+is newer, a banner at the top of the sheet says so, with a link to the repository. **✕** hides it until
+the next new version.
+
+- Only the DM sees it, and only the DM's browser contacts GitHub, once per page load.
+- An installed version newer than `main` (a test build) shows nothing.
+- If GitHub can't be reached, or the repository is made private, there's simply no message.
+- GitHub caches the file for up to 5 minutes, so a just-merged version can take a few minutes to show.
 
 ## Sheet width
 

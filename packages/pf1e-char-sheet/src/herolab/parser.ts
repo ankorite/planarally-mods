@@ -33,6 +33,7 @@ import {
     type InventoryItem,
     type PF1Character,
     type SheetAura,
+    type SheetResource,
     type SkillEntry,
     type SpecialEntry,
     type SpellEntry,
@@ -121,6 +122,7 @@ export function parseHeroLabXml(xmlText: string): PF1Character {
     parseFeats(character, result);
     parseSpells(character, result);
     parseInventory(character, result);
+    parseResources(character, result);
     parseAuras(character, result);
     parseSpecials(character, result);
 
@@ -255,6 +257,7 @@ function parseSpells(character: Element, out: PF1Character): void {
     const classNodes = ownAll(own(character, "classes"), "class");
 
     const casting: SpellcastingClass[] = [];
+    const claimed = new Set<Element>();
     for (const spellClass of ownAll(own(character, "spellclasses"), "spellclass")) {
         const className = attr(spellClass, "name");
 
@@ -270,18 +273,9 @@ function parseSpells(character: Element, out: PF1Character): void {
         // <spell class="..."> uses the bare class name (e.g. "Oracle"), while spellclass/class
         // use the full name with archetype (e.g. "Oracle (Dual-Cursed Oracle)"). Match by prefix.
         const baseClassName = className.toLowerCase();
-        const spells: SpellEntry[] = spellNodes
-            .filter((s) => baseClassName.startsWith(attr(s, "class").toLowerCase()))
-            .map((s) => {
-                const text = own(s, "description")?.textContent;
-                return {
-                    name: attr(s, "name"),
-                    level: num(attr(s, "level")),
-                    description: excerpt(text),
-                    fullText: fullText(text),
-                    prepared: s.closest("spellsmemorized") !== null,
-                };
-            });
+        const mine = spellNodes.filter((s) => baseClassName.startsWith(attr(s, "class").toLowerCase()));
+        mine.forEach((s) => claimed.add(s));
+        const spells = mine.map(toSpell);
 
         casting.push({
             className,
@@ -291,7 +285,79 @@ function parseSpells(character: Element, out: PF1Character): void {
             spells,
         });
     }
+    // Spells with no <spellclass> of their own - racial spellcasting such as a lillend's, which Hero
+    // Lab exports with class="Azata, Lillend,Racial" and no spell class - would otherwise be dropped.
+    // They're grouped by that class text, with the caster level the spells themselves carry.
+    const leftovers = new Map<string, Element[]>();
+    for (const s of spellNodes) {
+        if (claimed.has(s)) continue;
+        const cls = attr(s, "class") || "Other";
+        leftovers.set(cls, [...(leftovers.get(cls) ?? []), s]);
+    }
+    for (const [cls, nodes] of leftovers) {
+        const parts = cls
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean);
+        const racial = parts.length > 1 && parts[parts.length - 1]!.toLowerCase() === "racial";
+        casting.push({
+            className: racial ? `${parts.slice(0, -1).join(", ")} (racial)` : cls,
+            casterLevel: Math.max(0, ...nodes.map((s) => num(attr(s, "casterlevel")))),
+            concentration: 0,
+            spellsPerDay: {},
+            spells: nodes.map(toSpell),
+        });
+    }
     out.spellcasting = casting;
+}
+
+function toSpell(s: Element): SpellEntry {
+    const text = own(s, "description")?.textContent;
+    const optional = (name: string): string | undefined => attr(s, name) || undefined;
+    return {
+        name: attr(s, "name"),
+        level: num(attr(s, "level")),
+        description: excerpt(text),
+        fullText: fullText(text),
+        prepared: s.closest("spellsmemorized") !== null,
+        dc: attr(s, "dc") ? num(attr(s, "dc")) : undefined,
+        save: optional("save"),
+        range: optional("range"),
+        duration: optional("duration"),
+        castTime: optional("casttime"),
+        school: optional("schooltext"),
+    };
+}
+
+/**
+ * Hero Lab's tracked resources (every x/day and x/round ability: "Darkness (3/day)", "Bardic
+ * Performance (20 rounds/day)"), plus each spellcasting class's slots per day per spell level.
+ * The key drops the parenthesised part, so "(20 rounds/day)" becoming "(22 rounds/day)" on a
+ * level-up still updates the same tracker.
+ */
+function parseResources(character: Element, out: PF1Character): void {
+    const resources: SheetResource[] = [];
+    const seen = new Set<string>();
+    const push = (key: string, name: string, max: number, used: number): void => {
+        if (!name || !(max > 0) || seen.has(key)) return;
+        seen.add(key);
+        resources.push({ key, name, max, used: Math.min(Math.max(used, 0), max), uuid: "" });
+    };
+    for (const r of ownAll(own(character, "trackedresources"), "trackedresource")) {
+        const name = attr(r, "name");
+        const base = name
+            .replace(/\s*\(.*$/, "")
+            .trim()
+            .toLowerCase();
+        push(`res:${base}`, name, num(attr(r, "max")), num(attr(r, "used")));
+    }
+    for (const sc of out.spellcasting) {
+        const cls = sc.className.replace(/\s*\(.*$/, "").trim();
+        for (const [level, slots] of Object.entries(sc.spellsPerDay)) {
+            if (slots > 0) push(`slots:${cls.toLowerCase()}:${level}`, `${cls} level ${level} slots`, slots, 0);
+        }
+    }
+    out.resources = resources;
 }
 
 function parseInventory(character: Element, out: PF1Character): void {

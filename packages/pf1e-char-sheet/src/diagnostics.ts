@@ -490,7 +490,8 @@ const REQUIRED_API: [path: string, usedFor: string][] = [
     ["systems.trackers.getAll", "HP tracker"],
     ["systems.trackers.get", "HP tracker"],
     ["systems.trackers.add", "HP tracker"],
-    ["systems.trackers.update", "HP tracker"],
+    ["systems.trackers.update", "HP tracker, x/day trackers"],
+    ["systems.trackers.remove", "x/day trackers"],
     ["systems.auras.getAll", "auras"],
     ["systems.auras.add", "auras"],
     ["systems.auras.update", "auras"],
@@ -686,6 +687,22 @@ export async function buildHealthCheck(
             }
         }
         ok(`${good} of ${rolls.length} formulas resolve${engine === undefined ? "" : " and parse"}`);
+    });
+
+    await section("Trackers (x/day, x/round, spell slots)", () => {
+        const live = safe(() => callM(system(api, "trackers"), "getAll", shapeId) as unknown[], [] as unknown[]);
+        const resources = character.resources ?? [];
+        if (!resources.length) ok("the sheet has no limited-use abilities or spell slots for this character");
+        const off = new Set(character.untrackedResources ?? []);
+        for (const r of resources) {
+            if (off.has(r.key)) {
+                ok(`${r.name}: switched off on the Specials tab`);
+                continue;
+            }
+            const t = r.uuid ? live.find((x) => get(x, "uuid") === r.uuid) : undefined;
+            if (t) ok(`${r.name}: ${String(get(t, "value"))}/${String(get(t, "maxvalue"))} on token`);
+            else bad(`${r.name} is not on the token - use "Create / update trackers on the token"`);
+        }
     });
 
     await section("Auras", () => {
