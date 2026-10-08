@@ -42,7 +42,7 @@ import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
-import { resourceKeyForName, syncTrackedResources } from "./resources";
+import { resourceKeyForName, resourceLabel, syncTrackedResources } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { pushHp, type HpPushResult } from "./trackers";
@@ -909,7 +909,10 @@ function fmt(n: number): string {
         <div v-if="data.importedAt" class="imported-at">
             Last imported: {{ new Date(data.importedAt).toLocaleString() }}
         </div>
-        <div v-if="importNotes" class="imported-at">{{ importNotes }}</div>
+        <div v-if="importNotes" class="imported-at dismissable">
+            <span>{{ importNotes }}</span>
+            <button type="button" title="Dismiss" @click="importNotes = ''">✕</button>
+        </div>
         <div class="readonly-note">
             All fields except current HP are read-only - update the character in Hero Lab and re-import to change them.
         </div>
@@ -1041,26 +1044,28 @@ function fmt(n: number): string {
                 <span v-if="auraStatus" class="hp-push-status">{{ auraStatus }}</span>
             </div>
 
-            <h4>Trackers (x/day, x/round, spell slots)</h4>
+            <h4>Trackers (limited uses, charges, spell slots)</h4>
             <div v-if="(data.resources ?? []).length" class="table-wrap">
                 <table>
                     <thead>
                         <tr>
                             <th>Tracker</th>
-                            <th>Max</th>
+                            <th>Uses</th>
                             <th>On token</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr v-for="res of data.resources ?? []" :key="res.key">
                             <td>{{ res.name }}</td>
-                            <td>{{ res.max }}</td>
+                            <td>{{ resourceLabel(res) }}</td>
                             <td>{{ !isTracked(res) ? "off" : res.uuid ? "yes" : "no" }}</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            <div v-else class="readonly-note">No limited-use abilities or spell slots in the Hero Lab export.</div>
+            <div v-else class="readonly-note">
+                No limited-use abilities, charged items or spell slots in the Hero Lab export.
+            </div>
             <div class="hp-push-row">
                 <button type="button" @click="resyncResources">Create / update trackers on the token</button>
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
@@ -1431,8 +1436,9 @@ function fmt(n: number): string {
                 No specials found - import the character from Hero Lab to fill this in.
             </div>
             <div v-if="(data.resources ?? []).length" class="readonly-note">
-                Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day or rounds). Untick
-                one to remove its tracker; tick it to add it back.
+                Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day, rounds or
+                charges). Untick one to remove its tracker; tick it to add it back. Trackers never refill on their own,
+                so reset daily ones yourself after a rest.
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
             </div>
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
@@ -1469,7 +1475,7 @@ function fmt(n: number): string {
                             Track
                         </label>
                         <strong>{{ r.name }}</strong>
-                        <div class="hint">{{ r.max }} per day</div>
+                        <div class="hint">{{ resourceLabel(r) }}</div>
                     </li>
                 </ul>
             </div>
@@ -1642,6 +1648,20 @@ function fmt(n: number): string {
         white-space: pre-wrap;
         overflow: auto;
         resize: vertical;
+    }
+
+    .dismissable {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+
+        span {
+            flex: 1 1 auto;
+        }
+
+        button {
+            flex: 0 0 auto;
+        }
     }
 
     .update-banner {

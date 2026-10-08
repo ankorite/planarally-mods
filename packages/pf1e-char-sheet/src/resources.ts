@@ -109,11 +109,17 @@ export function syncResources(
         }
     }
 
+    // Name a few; past that just count them (the Core tab lists every tracker).
+    const list = (names: string[]): string => (names.length <= 5 ? ` (${names.join(", ")})` : "");
     const parts: string[] = [];
-    if (created.length) parts.push(`created ${created.length} (${created.join(", ")})`);
-    if (updated.length) parts.push(`updated ${updated.join(", ")}`);
-    if (removed.length) parts.push(`removed ${removed.join(", ")}`);
-    return { resources: out, summary: parts.length ? `Trackers: ${parts.join("; ")}.` : "" };
+    if (created.length) parts.push(`created ${created.length}${list(created)}`);
+    if (updated.length) parts.push(`updated ${updated.length}${list(updated)}`);
+    if (removed.length) parts.push(`removed ${removed.length}${list(removed)}`);
+    const many = created.length > 5 || updated.length > 5 || removed.length > 5;
+    return {
+        resources: out,
+        summary: parts.length ? `Trackers: ${parts.join("; ")}${many ? " - listed on the Core tab" : ""}.` : "",
+    };
 }
 
 /** The resource key a Hero Lab name maps to (the parser's rule): "Darkness (3/day)" -> "res:darkness". */
@@ -147,4 +153,20 @@ export function syncTrackedResources(
     );
     const synced = new Map(result.resources.map((r) => [r.key, r]));
     return { resources: all.map((r) => synced.get(r.key) ?? { ...r, uuid: "" }), summary: result.summary };
+}
+
+/**
+ * How a resource's uses come back, for labels: "4 per day", "20 rounds per day", "50 charges". Hero
+ * Lab's tracked resources mix daily abilities with items that have charges (wands), which never
+ * recharge, so the label follows the name rather than assuming "per day". Trackers never refill on
+ * their own either way: only a fresh tracker starts full.
+ */
+export function resourceLabel(r: Pick<SheetResource, "key" | "name" | "max">): string {
+    const name = r.name.toLowerCase();
+    if (r.key.startsWith("slots:")) return `${r.max} per day`;
+    if (/rounds?\s*(?:\/|per\s+)day/.test(name)) return `${r.max} rounds per day`;
+    if (/(?:\/|per\s+)day\b/.test(name)) return `${r.max} per day`;
+    if (/(?:\/|per\s+)week\b/.test(name)) return `${r.max} per week`;
+    if (/\bcharges?\b|\bwand\b|\bstaff\b|\brod\b/.test(name)) return `${r.max} charges`;
+    return `${r.max} uses`;
 }

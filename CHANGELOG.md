@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## [2026-10-08]
+
+- pf1e-char-sheet v0.21.1: trackers are labelled by how their uses work ("3 per day", "20 rounds per
+  day", "50 charges", "N uses") instead of always "per day"; wands and other charged items don't
+  recharge
+- pf1e-char-sheet: the import message can be dismissed (✕), and with more than 5 trackers it gives
+  a count instead of every name
+
 ## [2026-10-07]
 
 - pf1e-char-sheet v0.21.0:
