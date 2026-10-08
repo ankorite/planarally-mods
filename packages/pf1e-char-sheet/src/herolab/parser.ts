@@ -273,9 +273,13 @@ function parseSpells(character: Element, out: PF1Character): void {
         // <spell class="..."> uses the bare class name (e.g. "Oracle"), while spellclass/class
         // use the full name with archetype (e.g. "Oracle (Dual-Cursed Oracle)"). Match by prefix.
         const baseClassName = className.toLowerCase();
-        const mine = spellNodes.filter((s) => baseClassName.startsWith(attr(s, "class").toLowerCase()));
+        // A spell with no class attribute would match every class ("".startsWith) - leave it to "Other".
+        const mine = spellNodes.filter((s) => {
+            const cls = attr(s, "class").toLowerCase();
+            return cls !== "" && baseClassName.startsWith(cls);
+        });
         mine.forEach((s) => claimed.add(s));
-        const spells = mine.map(toSpell);
+        const spells = toSpells(mine);
 
         casting.push({
             className,
@@ -305,10 +309,26 @@ function parseSpells(character: Element, out: PF1Character): void {
             casterLevel: Math.max(0, ...nodes.map((s) => num(attr(s, "casterlevel")))),
             concentration: 0,
             spellsPerDay: {},
-            spells: nodes.map(toSpell),
+            spells: toSpells(nodes),
         });
     }
     out.spellcasting = casting;
+}
+
+/**
+ * The spells of one class, once each: a prepared caster's spell is both known and memorized, so it
+ * appears in both lists. Duplicates (same name and level) are merged, prepared if either copy is.
+ */
+function toSpells(nodes: Element[]): SpellEntry[] {
+    const byKey = new Map<string, SpellEntry>();
+    for (const node of nodes) {
+        const spell = toSpell(node);
+        const key = `${spell.name.toLowerCase()}|${spell.level}`;
+        const seen = byKey.get(key);
+        if (seen) seen.prepared ||= spell.prepared;
+        else byKey.set(key, spell);
+    }
+    return Array.from(byKey.values());
 }
 
 function toSpell(s: Element): SpellEntry {

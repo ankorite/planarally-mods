@@ -45,7 +45,7 @@ import { api, modVersion } from "./main";
 import { resourceKeyForName, resourceLabel, syncTrackedResources } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
-import { pushHp, type HpPushResult } from "./trackers";
+import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
 import { logDismissed, newerVersion, REPO_URL } from "./updates";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
@@ -130,6 +130,14 @@ function describePush(result: HpPushResult): string {
 
 /** Fired when the HP field is committed: save, then update the token's HP tracker if it has one. */
 function onHpCommitted(): void {
+    // v-model.number leaves an emptied or non-numeric field as a string: put back the token's tracker
+    // value (or max HP) rather than saving and pushing a non-number.
+    const hp = data.value.combat.hp;
+    if (typeof hp.current !== "number" || !Number.isFinite(hp.current)) {
+        const tracker = currentLocalId.value === undefined ? undefined : findHpTracker(api, currentLocalId.value);
+        hp.current = tracker?.value ?? hp.max;
+        return;
+    }
     save();
     if (currentLocalId.value === undefined) return;
     try {
@@ -341,6 +349,20 @@ async function onFileSelected(event: Event): Promise<void> {
             enabled: prevSpellMacros.enabled.filter((k) => spellKeys.has(k)),
             formulas: Object.fromEntries(Object.entries(prevSpellMacros.formulas).filter(([k]) => spellKeys.has(k))),
         };
+        // Current HP is play state too: re-importing the same character (a level-up, a new item) keeps
+        // the HP the token is at, capped at the new maximum - or full, if it was full. A different
+        // character takes Hero Lab's HP.
+        const prev = data.value;
+        if (
+            prev.importedAt &&
+            prev.identity.name === character.identity.name &&
+            Number.isFinite(prev.combat.hp.current)
+        ) {
+            const wasFull = prev.combat.hp.current >= prev.combat.hp.max;
+            character.combat.hp.current = wasFull
+                ? character.combat.hp.max
+                : Math.min(prev.combat.hp.current, character.combat.hp.max);
+        }
         // And the trackers switched off on the Specials tab.
         const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
         character.untrackedResources = (data.value.untrackedResources ?? []).filter((k) => resourceKeys.has(k));

@@ -1,0 +1,70 @@
+name: Release pf1e-char-sheet
+
+# Push a tag "pf1e-v<version>" (matching mod.toml) to build the mod and publish a GitHub release with
+# the .pam attached. A version with a "-" (0.22.0-beta.1) is published as a pre-release.
+
+on:
+    push:
+        tags:
+            - "pf1e-v*"
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 10
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - name: Check the tag matches mod.toml
+              id: version
+              run: |
+                  tag="${GITHUB_REF_NAME#pf1e-v}"
+                  version="$(sed -n 's/^version = "\(.*\)"/\1/p' packages/pf1e-char-sheet/mod.toml)"
+                  if [ "$tag" != "$version" ]; then
+                      echo "::error::Tag $GITHUB_REF_NAME doesn't match mod.toml version $version"
+                      exit 1
+                  fi
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+
+            - run: pnpm install --frozen-lockfile
+
+            - name: Lint, format check and build
+              run: |
+                  pnpm -F '@planarally/pf1e-char-sheet' lint:ci
+                  pnpm -F '@planarally/pf1e-char-sheet' format:ci
+                  pnpm -F '@planarally/pf1e-char-sheet' build
+
+            - run: pnpm zip pf1e-char-sheet
+
+            - name: Publish the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  pam="pf1e-char-sheet-$VERSION.pam"
+                  cp packages/pf1e-char-sheet/dist-zip/pf1e-char-sheet.pam "$pam"
+                  prerelease=""
+                  case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+                  cat > notes.md <<NOTES
+                  Pathfinder 1e Character Sheet $VERSION.
+
+                  **Install:** download \`$pam\` below and upload it in PlanarAlly's DM Settings → Mod.
+
+                  What changed: see [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/CHANGELOG.md).
+                  Usage, requirements and how to report a bug: see the
+                  [mod's README](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/packages/pf1e-char-sheet/README.md).
+                  NOTES
+                  gh release create "$GITHUB_REF_NAME" "$pam" \
+                      --title "Pathfinder 1e Character Sheet $VERSION" \
+                      --notes-file notes.md $prerelease

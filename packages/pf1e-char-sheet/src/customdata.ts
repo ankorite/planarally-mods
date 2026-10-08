@@ -1,6 +1,6 @@
 import type { GameApi, LocalId } from "@planarally/mod-api";
 
-import { applyAdjustments } from "./adjustments";
+import { applyAdjustments, leadingDamage } from "./adjustments";
 import { abilityModifier, type AbilityKey, type PF1Character } from "./data";
 import { macroSpells } from "./spells";
 
@@ -116,7 +116,7 @@ const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"] as const;
 
 /** The leading dice formula of a Hero Lab damage text: "2d6+4 plus grab" -> "2d6+4"; none for flat damage. */
 export function damageFormula(text: string): string | undefined {
-    return /^\s*\d+\s*d\s*\d+(?:\s*[+-]\s*\d+)?/i.exec(text)?.[0].replace(/\s+/g, "");
+    return leadingDamage(text)?.formula;
 }
 
 /**

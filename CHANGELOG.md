@@ -2,6 +2,18 @@
 
 ## [2026-10-08]
 
+- pf1e-char-sheet v0.22.0-beta.1, the first beta release:
+    - released as a `.pam` on GitHub Releases by a workflow (`.github/workflows/release-pf1e.yml`)
+      when a `pf1e-v<version>` tag is pushed; README has install, bug-report and release steps
+    - MIT licensed (`LICENSE.md`, included in the `.pam`)
+    - update check understands pre-release versions (`0.22.0-beta.1` < `0.22.0-beta.2` < `0.22.0`)
+    - fixed: Duplicate token could take a token the DM clicked while waiting for the copy
+    - fixed: with several players connected, a tracker change was written to the sheet by every client
+    - fixed: damage with more than one dice term ("1d8+2d6 fire") was cut short or adjusted wrongly
+    - fixed: a max HP of 0 was pushed to the HP tracker; clearing the current-HP field stored a non-number
+    - fixed: a spell listed twice in the Hero Lab export showed up twice
+    - fixed: spells with an empty class attribute were matched to the first spellcasting class
+    - re-importing the same character keeps current HP (full stays full, otherwise capped at the new max)
 - Add 5e SRD 5.1 mod
 - Add license to .pam file in zip script
 - pf1e-char-sheet v0.21.2: the update check writes its outcome to the browser console

@@ -294,11 +294,25 @@ function adjustAttackBonus(text: string, delta: number, extraAttack: boolean): s
 /** Shifts the flat modifier of the leading dice formula: ("2d6+4 plus grab", +2) -> "2d6+6 plus grab". */
 function adjustDamage(text: string, delta: number): string {
     if (delta === 0) return text;
-    const m = /^\s*(\d+\s*d\s*\d+)\s*(?:([+-])\s*(\d+))?/i.exec(text);
-    if (!m) return text;
-    const mod = (m[2] === "-" ? -1 : 1) * Number(m[3] ?? 0) + delta;
-    const dice = m[1]!.replace(/\s+/g, "");
-    return `${dice}${mod === 0 ? "" : fmtBonus(mod)}${text.slice(m[0].length)}`;
+    const lead = leadingDamage(text);
+    if (!lead) return text;
+    // Keep every dice term; fold the flat terms and the adjustment into one number at the end.
+    const terms = lead.formula.match(/[+-]?\d+(?:d\d+)?/gi) ?? [];
+    const dice = terms.filter((t) => /d/i.test(t));
+    const flat = terms.filter((t) => !/d/i.test(t)).reduce((sum, t) => sum + Number(t), 0) + delta;
+    const diceText = dice.map((t, i) => (i === 0 ? t.replace(/^\+/, "") : /^[+-]/.test(t) ? t : `+${t}`)).join("");
+    return `${diceText}${flat === 0 ? "" : fmtBonus(flat)}${lead.rest}`;
+}
+
+/**
+ * The dice formula a Hero Lab damage text starts with, and what follows it: "2d6+4 plus grab" ->
+ * "2d6+4" and " plus grab"; "1d8+2d6+3 fire" -> "1d8+2d6+3" and " fire". A chain of terms after the
+ * first dice, so a second dice term ("+2d6") isn't mistaken for a flat "+2".
+ */
+export function leadingDamage(text: string): { formula: string; rest: string } | undefined {
+    const m = /^\s*\d+\s*d\s*\d+(?:\s*[+-]\s*\d+(?:\s*d\s*\d+)?)*/i.exec(text);
+    if (!m) return undefined;
+    return { formula: m[0].replace(/\s+/g, ""), rest: text.slice(m[0].length) };
 }
 
 /**

@@ -8,6 +8,45 @@ Hero Lab is the source of truth: the sheet is read-only except for current HP. E
 Hero Lab, re-export and re-import to update the sheet, and only adjust current HP in PlanarAlly
 during play.
 
+## Beta
+
+This is a beta: it is in use at real tables but needs wider testing. Please report what breaks.
+
+### Installing
+
+1. Download `pf1e-char-sheet-<version>.pam` from the latest release on the
+   [Releases page](https://github.com/ankorite/planarally-mods/releases) (betas are marked
+   "Pre-release").
+2. In PlanarAlly, open DM Settings → Mod and upload the `.pam`.
+3. To update, upload the newer `.pam` the same way. Sheets already imported keep their data.
+
+Requirements:
+
+- A PlanarAlly server with the mod API (the `dev` branch or a release that includes mods).
+- Hero Lab Classic, exporting with File > Custom Output > Export XML. Export with Hero Lab's own
+  adjustments switched off and use the sheet's Adjustments tab instead, or they count twice.
+
+### Reporting a bug
+
+Open an issue on [GitHub](https://github.com/ankorite/planarally-mods/issues) with:
+
+- what you did, what you expected, and what happened;
+- the mod version (DM Settings → Mod, or the version in the update banner);
+- the **Health check** from the sheet's Diagnostics tab (DM only) for the token involved;
+- anything in the browser console (F12) starting with `[pf1e-sheet]`;
+- if an import went wrong, the Hero Lab XML (or the part of it that matters).
+
+### Known limitations
+
+- Hero Lab is the only import source; there is no manual entry beyond current HP and the toggles.
+- Spell formulas for macros are guessed from the spell's text; check them on the Spells tab.
+- Re-importing keeps current HP (still full if it was full, otherwise capped at the new maximum).
+- Duplicate token relies on PlanarAlly's Ctrl+C / Ctrl+V, so it replaces PlanarAlly's shape clipboard.
+- See also the limitations listed under [Importing from Hero Lab](#importing-from-hero-lab).
+
+This mod is MIT licensed (see `LICENSE.md`) and is not affiliated with Paizo Inc. or Lone Wolf
+Development.
+
 ## Building
 
 From the repository root:
@@ -19,6 +58,23 @@ pnpm zip pf1e-char-sheet
 ```
 
 Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
+
+### Releasing
+
+`.github/workflows/release-pf1e.yml` builds the mod and publishes a GitHub release with the `.pam`
+attached when a tag `pf1e-v<version>` is pushed. A version with a `-` (`0.22.0-beta.1`) becomes a
+pre-release.
+
+1. Set the version in `mod.toml` and `package.json`, add it to the root `CHANGELOG.md`, and merge to
+   `main` (the update check reads `main`'s `mod.toml`).
+2. Tag that commit and push the tag:
+
+    ```zsh
+    git tag pf1e-v0.22.0-beta.1
+    git push origin pf1e-v0.22.0-beta.1
+    ```
+
+The workflow refuses a tag that doesn't match the version in `mod.toml`.
 
 ## Source layout
 

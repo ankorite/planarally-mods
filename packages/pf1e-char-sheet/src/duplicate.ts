@@ -27,6 +27,15 @@ interface ListSystem {
 }
 
 const systems = (api: GameApi): Dict => api.systems as unknown as Dict;
+
+/** Local ids of every token PlanarAlly knows about (its properties state holds one entry per shape). */
+function knownShapeIds(api: GameApi): number[] {
+    try {
+        return Array.from(api.systemsState.properties.readonly.data.keys());
+    } catch {
+        return [];
+    }
+}
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Sends one shortcut to PlanarAlly's window keydown handler (Ctrl on Windows/Linux, Cmd on a Mac). */
@@ -69,6 +78,10 @@ export async function duplicateToken(api: GameApi, shape: LocalId, character: PF
     }
 
     // 1. PlanarAlly's own copy & paste of just this token.
+    // Every token that exists before the paste, so a token the DM clicks while waiting can never be
+    // mistaken for the copy: the copy is a selected token that didn't exist a moment ago.
+    const existing = new Set<number>(knownShapeIds(api));
+    existing.add(shape);
     selected.set(shape);
     press("c");
     await sleep(50);
@@ -77,7 +90,7 @@ export async function duplicateToken(api: GameApi, shape: LocalId, character: PF
     for (let waited = 0; waited < 2000 && copy === undefined; waited += 50) {
         await sleep(50);
         const now = selected.get();
-        if (now.length === 1 && now[0]!.id !== shape) copy = now[0]!.id;
+        if (now.length === 1 && !existing.has(now[0]!.id)) copy = now[0]!.id;
     }
     if (copy === undefined) {
         return {

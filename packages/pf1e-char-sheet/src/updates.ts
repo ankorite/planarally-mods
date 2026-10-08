@@ -10,15 +10,43 @@ export const REPO_URL = "https://github.com/ankorite/planarally-mods";
 const REMOTE_MOD_TOML =
     "https://raw.githubusercontent.com/ankorite/planarally-mods/main/packages/pf1e-char-sheet/mod.toml";
 
-/** -1, 0 or 1: "0.21.0" vs "0.22.0" -> -1. Missing parts count as 0; non-numbers compare as 0. */
+const sign = (n: number): number => (n < 0 ? -1 : n > 0 ? 1 : 0);
+
+/**
+ * -1, 0 or 1, semver-style: "0.21.0" < "0.22.0-beta.1" < "0.22.0-beta.2" < "0.22.0". The numbers
+ * before any "-" are compared numerically (missing parts count as 0); a pre-release ("-beta.1") comes
+ * before the same version without one, and pre-releases compare part by part (numbers numerically,
+ * numbers before words, then the longer one is later).
+ */
 export function compareVersions(a: string, b: string): number {
-    const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
-    const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
+    const [coreA, preA] = splitVersion(a);
+    const [coreB, preB] = splitVersion(b);
+    const pa = coreA.split(".").map((n) => Number.parseInt(n, 10) || 0);
+    const pb = coreB.split(".").map((n) => Number.parseInt(n, 10) || 0);
     for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
         const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-        if (d !== 0) return d < 0 ? -1 : 1;
+        if (d !== 0) return sign(d);
+    }
+    if (preA === undefined || preB === undefined) return preA === preB ? 0 : preA === undefined ? 1 : -1;
+    const xa = preA.split(".");
+    const xb = preB.split(".");
+    for (let i = 0; i < Math.max(xa.length, xb.length); i++) {
+        const ia = xa[i];
+        const ib = xb[i];
+        if (ia === undefined || ib === undefined) return ia === undefined ? -1 : 1;
+        const na = /^\d+$/.test(ia);
+        const nb = /^\d+$/.test(ib);
+        if (na && nb && Number(ia) !== Number(ib)) return sign(Number(ia) - Number(ib));
+        if (na !== nb) return na ? -1 : 1;
+        if (!na && ia !== ib) return ia < ib ? -1 : 1;
     }
     return 0;
+}
+
+/** "0.22.0-beta.1" -> ["0.22.0", "beta.1"]; "0.22.0" -> ["0.22.0", undefined]. */
+function splitVersion(v: string): [string, string | undefined] {
+    const i = v.indexOf("-");
+    return i === -1 ? [v.trim(), undefined] : [v.slice(0, i).trim(), v.slice(i + 1).trim()];
 }
 
 /** The `version = "..."` of a mod.toml. */
