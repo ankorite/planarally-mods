@@ -98,17 +98,32 @@ export async function duplicateToken(api: GameApi, shape: LocalId, character: PF
     if (!shapeId)
         return { ok: false, copy, message: "The copy has no id on the server yet - import the sheet onto it." };
 
-    // The copy is sent to the server just before; give it a moment so the data block can attach to it,
-    // and retry the creation once if the server wasn't ready.
+    // The copy is sent to the server just before; give it a moment so the data block can attach to it.
+    // The block may already exist in this browser: once the copy is selected, an open sheet follows it
+    // and loads (an empty) one. So get-or-load it rather than create it, then fill it with the copied
+    // data - updateData also refreshes that open sheet - and save. sync() creates the block on the
+    // server when it isn't there yet; it is retried once if the server wasn't ready.
+    //
+    // Two loads of the same block at once make the second throw "already exists", so wait for the open
+    // sheet's own load to finish first, and only load it here if nothing else did.
+    const repr = { category: "shape", shape: shapeId, name: DATA_BLOCK_NAME } as const;
     await sleep(500);
-    const block = api.createDataBlock<PF1Character>(
-        { category: "shape", shape: shapeId, name: DATA_BLOCK_NAME },
-        data,
-        {
-            createOnServer: true,
-        },
-    );
-    await sleep(1500);
+    let block = api.getDataBlock<PF1Character>(repr);
+    for (let waited = 0; waited < 2000 && !block; waited += 100) {
+        await sleep(100);
+        block = api.getDataBlock<PF1Character>(repr);
+    }
+    if (!block) {
+        try {
+            block = await api.getOrLoadDataBlock<PF1Character>(repr, { defaultData: () => data });
+        } catch {
+            block = api.getDataBlock<PF1Character>(repr); // another load won the race; use its block
+        }
+    }
+    if (!block) return { ok: false, copy, message: "Couldn't create the copy's sheet - import the sheet onto it." };
+    block.updateData(data);
+    block.sync();
+    await sleep(3000);
     if (!block.existsOnServer) block.sync();
 
     // 3. Make sure the copy's Custom Data (numbers and dice macros) is complete.
