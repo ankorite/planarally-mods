@@ -909,7 +909,10 @@ function fmt(n: number): string {
         <div v-if="data.importedAt" class="imported-at">
             Last imported: {{ new Date(data.importedAt).toLocaleString() }}
         </div>
-        <div v-if="importNotes" class="imported-at">{{ importNotes }}</div>
+        <div v-if="importNotes" class="imported-at dismissable">
+            <span>{{ importNotes }}</span>
+            <button type="button" title="Dismiss" @click="importNotes = ''">✕</button>
+        </div>
         <div class="readonly-note">
             All fields except current HP are read-only - update the character in Hero Lab and re-import to change them.
         </div>
@@ -1645,6 +1648,20 @@ function fmt(n: number): string {
         white-space: pre-wrap;
         overflow: auto;
         resize: vertical;
+    }
+
+    .dismissable {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+
+        span {
+            flex: 1 1 auto;
+        }
+
+        button {
+            flex: 0 0 auto;
+        }
     }
 
     .update-banner {

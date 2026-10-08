@@ -109,11 +109,17 @@ export function syncResources(
         }
     }
 
+    // Name a few; past that just count them (the Core tab lists every tracker).
+    const list = (names: string[]): string => (names.length <= 5 ? ` (${names.join(", ")})` : "");
     const parts: string[] = [];
-    if (created.length) parts.push(`created ${created.length} (${created.join(", ")})`);
-    if (updated.length) parts.push(`updated ${updated.join(", ")}`);
-    if (removed.length) parts.push(`removed ${removed.join(", ")}`);
-    return { resources: out, summary: parts.length ? `Trackers: ${parts.join("; ")}.` : "" };
+    if (created.length) parts.push(`created ${created.length}${list(created)}`);
+    if (updated.length) parts.push(`updated ${updated.length}${list(updated)}`);
+    if (removed.length) parts.push(`removed ${removed.length}${list(removed)}`);
+    const many = created.length > 5 || updated.length > 5 || removed.length > 5;
+    return {
+        resources: out,
+        summary: parts.length ? `Trackers: ${parts.join("; ")}${many ? " - listed on the Core tab" : ""}.` : "",
+    };
 }
 
 /** The resource key a Hero Lab name maps to (the parser's rule): "Darkness (3/day)" -> "res:darkness". */
