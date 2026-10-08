@@ -30,6 +30,31 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/dnd-5e-srd:
+    dependencies:
+      '@planarally/mod-api':
+        specifier: ^0.2.0
+        version: 0.2.0(vue@3.5.43(typescript@6.0.3))
+      vue:
+        specifier: ^3.5.43
+        version: 3.5.43(typescript@6.0.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.5
+        version: 24.19.0
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.9
+        version: 6.0.9(vite@8.3.2(@types/node@24.19.0)(sass-embedded@1.105.1)(sass@1.105.1))(vue@3.5.43(typescript@6.0.3))
+      '@vue/tsconfig':
+        specifier: ^0.9.1
+        version: 0.9.1(typescript@6.0.3)(vue@3.5.43(typescript@6.0.3))
+      vite:
+        specifier: ^8.3.2
+        version: 8.3.2(@types/node@24.19.0)(sass-embedded@1.105.1)(sass@1.105.1)
+      vue-tsc:
+        specifier: ^3.3.12
+        version: 3.3.12(typescript@6.0.3)
+
   packages/obfuscated-trackers:
     dependencies:
       '@planarally/mod-api':
@@ -506,6 +531,11 @@ packages:
 
   '@planarally/mod-api@0.1.1':
     resolution: {integrity: sha512-rg7o+VVXEho7avGym9+EeFo2DazbeGJ0ItCPEcpNuu7t+02dwWeoH7Ek87J/Og6kxQY8oqNZ3ZUfRE9iKgkeNw==}
+    peerDependencies:
+      vue: ^3.5.0
+
+  '@planarally/mod-api@0.2.0':
+    resolution: {integrity: sha512-mieJKevfdJjPSGHQRcXZ24pPa4alDZeeXMgz1UVnuDnHPK0etDK7FQLaIXypc1410BgwgXAk+L4QKca5XCF//g==}
     peerDependencies:
       vue: ^3.5.0
 
@@ -1447,6 +1477,10 @@ snapshots:
     optional: true
 
   '@planarally/mod-api@0.1.1(vue@3.5.43(typescript@6.0.3))':
+    dependencies:
+      vue: 3.5.43(typescript@6.0.3)
+
+  '@planarally/mod-api@0.2.0(vue@3.5.43(typescript@6.0.3))':
     dependencies:
       vue: 3.5.43(typescript@6.0.3)
 

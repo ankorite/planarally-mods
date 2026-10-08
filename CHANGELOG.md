@@ -2,6 +2,8 @@
 
 ## [2026-10-08]
 
+- Add 5e SRD 5.1 mod
+- Add license to .pam file in zip script
 - pf1e-char-sheet v0.21.2: the update check writes its outcome to the browser console
   (`[pf1e-sheet] update check: ...`): installed vs GitHub version, or why GitHub couldn't be reached
 - pf1e-char-sheet v0.21.1: trackers are labelled by how their uses work ("3 per day", "20 rounds per
