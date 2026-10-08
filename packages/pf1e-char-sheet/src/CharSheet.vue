@@ -37,6 +37,7 @@ import {
     type SpellEntry,
 } from "./data";
 import { buildApiDump, buildHealthCheck } from "./diagnostics";
+import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
 import { syncResources } from "./resources";
@@ -199,6 +200,26 @@ const visibleTabs = computed<readonly TabName[]>(() => {
     const tabs = hasSpells.value ? all : all.filter((t) => t !== "Spells");
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
+
+// --- Duplicate (monster/NPC sheet, so DM only) ---------------------------------------------------
+const duplicating = ref(false);
+const duplicateStatus = ref("");
+
+async function duplicate(): Promise<void> {
+    const id = currentLocalId.value;
+    if (id === undefined || duplicating.value) return;
+    duplicating.value = true;
+    duplicateStatus.value = "Duplicating...";
+    try {
+        duplicateStatus.value = (await duplicateToken(api, id, data.value)).message;
+    } catch (e) {
+        console.error("[pf1e-sheet] duplicate failed", e);
+        duplicateStatus.value = "Duplicating failed - see the console.";
+    } finally {
+        duplicating.value = false;
+        setTimeout(() => (duplicateStatus.value = ""), 8000);
+    }
+}
 
 // --- Update check (DM only): a newer version of the mod on GitHub ------------------------------
 // Players can't install mods, so only the DM is told (and only the DM's browser asks GitHub).
@@ -821,9 +842,19 @@ function fmt(n: number): string {
                 {{ data.identity.name || (isCharacter ? "Unnamed character" : "Unnamed creature") }}
                 <span v-if="!isCharacter" class="sheet-kind">Monster / NPC</span>
             </div>
+            <button
+                v-if="!isCharacter"
+                type="button"
+                :disabled="duplicating"
+                title="Make a copy of this token with the same sheet"
+                @click="duplicate"
+            >
+                Duplicate token
+            </button>
             <button type="button" @click="triggerImport">Import from Hero Lab…</button>
             <input ref="fileInput" type="file" accept=".xml" style="display: none" @change="onFileSelected" />
         </div>
+        <div v-if="duplicateStatus" class="imported-at">{{ duplicateStatus }}</div>
         <div v-if="importError" class="error">{{ importError }}</div>
         <div v-if="data.importedAt" class="imported-at">
             Last imported: {{ new Date(data.importedAt).toLocaleString() }}

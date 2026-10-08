@@ -9,6 +9,8 @@
     - spell dice macros: a Macro toggle per spell with a formula guessed from the spell's text (editable)
     - fixed: spells without a spell class (e.g. a monster's racial spellcasting) were dropped on import
     - update check: the DM sees a message on the sheet when a newer version is on GitHub
+    - Duplicate token button on the monster/NPC sheet: copies the token (PlanarAlly's own copy & paste)
+      with its sheet, trackers, auras and dice macros
 
 - pf1e-char-sheet v0.20.0:
     - limited sheet for monsters and NPCs: any token that isn't a character gets a DM-only sheet with

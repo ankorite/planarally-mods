@@ -39,6 +39,7 @@ Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
+- `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
 
@@ -82,6 +83,14 @@ macros) but only has these tabs:
 - **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
 - **Spells**: only when it has spells, as on the full sheet (see Spells)
 - **Specials**: Hero Lab's special abilities
+
+**Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
+encounter with five orcs from one import. The mod API can't create tokens, so it uses PlanarAlly's own
+copy & paste (it selects the token and presses Ctrl+C, Ctrl+V for you; Cmd on a Mac): the copy has the
+same image, size, name, HP, trackers, auras and dice macros, lands on the current layer just offset from
+the original, and is selected afterwards. The sheet data is copied to it, pointing at the copy's own
+trackers and auras, so each token tracks its own HP and uses. It replaces whatever was on PlanarAlly's
+shape clipboard.
 
 The header shows "Monster / NPC" to tell the two apart. HP changes made on the token's tracker flow
 back to the sheet as for characters; changing HP on a token that has no imported sheet never creates
