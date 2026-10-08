@@ -104,4 +104,5 @@ It currently adds a ship character sheet mimicking the layout of the official sh
 This mod adds a Pathfinder 1st Edition character sheet tab to shapes marked as characters.
 
 It supports importing a character from a Hero Lab XML export, two-way HP tracker sync, and dice rolls driven by the token's custom data.
+It is in beta: download the `.pam` from the [Releases page](https://github.com/ankorite/planarally-mods/releases).
 See `packages/pf1e-char-sheet/README.md` for details.

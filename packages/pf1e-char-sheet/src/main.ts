@@ -46,14 +46,20 @@ function dispose(): void {
 }
 
 // Payload shape from PA's own source: { id, trackerId, delta, syncTo }, emitted after the delta has
-// been applied to the stored tracker.
+// been applied to the stored tracker - on every connected client.
 function onTrackerUpdated(payload: unknown): void {
-    const p = payload as { id?: unknown; trackerId?: unknown } | undefined;
+    const p = payload as { id?: unknown; trackerId?: unknown; syncTo?: { server?: unknown } } | undefined;
     if (typeof p?.id !== "number" || typeof p.trackerId !== "string") return;
     const id = p.id as LocalId;
 
-    // A monster/NPC's sheet is the DM's: only the DM's client writes it back (and players' clients,
-    // which can't edit it, don't try).
+    // One writer per change: the client where it was made. PA applies a local change with
+    // syncTo.server = true (and sends it to the server); the same change arriving from another client is
+    // replayed with server = false. That client can edit the token (or it couldn't have changed the
+    // tracker), and the others then get the new sheet data from the server like any other save -
+    // rather than every connected browser loading and saving the data block at once.
+    if (p.syncTo?.server !== true) return;
+
+    // A monster/NPC's sheet is the DM's: only the DM's client writes it back.
     const character = isCharacterShape(api, id);
     if (!character && !isDm(api)) return;
 

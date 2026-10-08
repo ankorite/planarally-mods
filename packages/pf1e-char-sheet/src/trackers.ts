@@ -67,9 +67,10 @@ export function pushHp(
     if (!trackers) return "unsupported";
     const sync: Sync = { ui: true, server: true };
 
+    // A sheet that was never imported has max HP 0: never let that overwrite a real tracker maximum.
     const existing = trackers.getAll(shape).find((t) => isHpTrackerName(t.name));
     if (existing) {
-        trackers.update(shape, existing.uuid, { value: current, maxvalue: max }, sync);
+        trackers.update(shape, existing.uuid, max > 0 ? { value: current, maxvalue: max } : { value: current }, sync);
         return "updated";
     }
     if (!createIfMissing) return "no-tracker";

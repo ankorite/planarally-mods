@@ -2,9 +2,9 @@
 apiSchema = "0.1.0"
 tag = "pf1e-sheet"
 name = "Pathfinder 1e Character Sheet"
-version = "0.21.2"
+version = "0.22.0-beta.1"
 author = "Ankorite"
-shortDescription = "A Pathfinder 1e character sheet with Hero Lab import"
+shortDescription = "A Pathfinder 1e character sheet with Hero Lab import (beta)"
 
 description = """
 Adds a Pathfinder 1st Edition character sheet tab to shapes marked as characters.
