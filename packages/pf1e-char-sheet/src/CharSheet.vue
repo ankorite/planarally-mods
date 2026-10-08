@@ -46,7 +46,7 @@ import { resourceKeyForName, resourceLabel, syncTrackedResources } from "./resou
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { pushHp, type HpPushResult } from "./trackers";
-import { newerVersion, REPO_URL } from "./updates";
+import { logDismissed, newerVersion, REPO_URL } from "./updates";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -241,7 +241,9 @@ watch(
         } catch {
             /* storage unavailable: show it */
         }
-        if (version && version !== dismissed && viewerIsDm(api)) availableUpdate.value = version;
+        if (!version || !viewerIsDm(api)) return;
+        if (version === dismissed) logDismissed(version, UPDATE_DISMISSED_KEY);
+        else availableUpdate.value = version;
     },
     { immediate: true },
 );

@@ -284,7 +284,10 @@ the next new version.
 
 - Only the DM sees it, and only the DM's browser contacts GitHub, once per page load.
 - An installed version newer than `main` (a test build) shows nothing.
-- If GitHub can't be reached, or the repository is made private, there's simply no message.
+- If GitHub can't be reached, or the repository is made private, there's no banner. The outcome is
+  always written to the browser console (F12) as `[pf1e-sheet] update check: ...`: the installed and
+  GitHub versions, or the error, e.g. a request blocked by the server's Content-Security-Policy or a
+  browser extension.
 - GitHub caches the file for up to 5 minutes, so a just-merged version can take a few minutes to show.
 
 ## Sheet width

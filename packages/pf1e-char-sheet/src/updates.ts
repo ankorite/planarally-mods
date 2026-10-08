@@ -1,8 +1,10 @@
 // Checks GitHub for a newer version of this mod, so the DM can be told on the sheet.
 //
 // The mod's mod.toml on the repository's main branch is read straight from raw.githubusercontent.com,
-// which allows cross-origin reads of public repositories. It is fetched at most once per page load,
-// and any failure (offline, repository made private, file moved) just means no message.
+// which allows cross-origin reads of public repositories. It is fetched at most once per page load.
+// A failure (offline, blocked by the server's Content-Security-Policy or a browser extension,
+// repository made private, file moved) means no banner, but the outcome is always written to the
+// browser console as "[pf1e-sheet] update check: ...", so a missing banner can be explained.
 
 export const REPO_URL = "https://github.com/ankorite/planarally-mods";
 const REMOTE_MOD_TOML =
@@ -24,6 +26,8 @@ export function tomlVersion(toml: string): string | undefined {
     return /^\s*version\s*=\s*"([^"]+)"/m.exec(toml)?.[1];
 }
 
+const LOG = "[pf1e-sheet] update check:";
+
 let latest: Promise<string | undefined> | undefined;
 
 /** The version on GitHub's main branch, fetched once per page load; undefined if unavailable. */
@@ -33,8 +37,20 @@ function latestVersion(): Promise<string | undefined> {
         const timer = setTimeout(() => ctrl.abort(), 8000);
         try {
             const r = await fetch(REMOTE_MOD_TOML, { signal: ctrl.signal });
-            return r.ok ? tomlVersion(await r.text()) : undefined;
-        } catch {
+            if (!r.ok) {
+                console.warn(`${LOG} GitHub answered ${r.status} ${r.statusText} for ${REMOTE_MOD_TOML}`);
+                return undefined;
+            }
+            const version = tomlVersion(await r.text());
+            if (!version) console.warn(`${LOG} no version found in ${REMOTE_MOD_TOML}`);
+            return version;
+        } catch (e) {
+            const reason = ctrl.signal.aborted ? "no answer within 8 seconds" : String(e);
+            console.warn(
+                `${LOG} couldn't reach GitHub (${REMOTE_MOD_TOML}): ${reason}. ` +
+                    "If the browser console also shows a Content-Security-Policy (connect-src) or CORS error, " +
+                    "the PlanarAlly server or a browser extension is blocking the request.",
+            );
             return undefined;
         } finally {
             clearTimeout(timer);
@@ -43,9 +59,39 @@ function latestVersion(): Promise<string | undefined> {
     return latest;
 }
 
+let logged = false;
+/** Logs the outcome once per page load (the check runs each time a DM opens a sheet). */
+function logOnce(fn: () => void): void {
+    if (logged) return;
+    logged = true;
+    fn();
+}
+
 /** The newer version available on GitHub, or undefined when `installed` is current (or newer). */
 export async function newerVersion(installed: string | undefined): Promise<string | undefined> {
-    if (!installed) return undefined;
+    if (!installed) {
+        logOnce(() => console.warn(`${LOG} the installed version is unknown, so there is nothing to compare.`));
+        return undefined;
+    }
     const remote = await latestVersion();
-    return remote && compareVersions(remote, installed) > 0 ? remote : undefined;
+    if (!remote) return undefined; // the reason was logged by latestVersion
+    const newer = compareVersions(remote, installed) > 0;
+    logOnce(() =>
+        console.info(
+            `${LOG} installed ${installed}, GitHub has ${remote} - ` +
+                (newer ? "update available." : "up to date (the banner only shows for a newer version)."),
+        ),
+    );
+    return newer ? remote : undefined;
+}
+
+/** Logs that a found update isn't shown because it was dismissed with the banner's ✕. */
+let loggedDismissed = false;
+export function logDismissed(version: string, storageKey: string): void {
+    if (loggedDismissed) return;
+    loggedDismissed = true;
+    console.info(
+        `${LOG} ${version} was dismissed with the banner's ✕, so it isn't shown again. To bring it back, run ` +
+            `localStorage.removeItem("${storageKey}") in this console and reload.`,
+    );
 }
