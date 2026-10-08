@@ -260,6 +260,11 @@ export type PF1Character = {
     /** Tracked resources (x/day, x/round, spell slots). Optional for older saves. */
     resources?: SheetResource[];
     /**
+     * Keys of the resources switched off on the Specials tab: they get no tracker on the token.
+     * Resources are tracked unless listed here; kept across re-imports. Optional for older saves.
+     */
+    untrackedResources?: string[];
+    /**
      * Spells exported as dice macros: `enabled` holds spell keys (see spellKey in spells.ts) and
      * `formulas` any formula edited on the Spells tab. Optional for older saves.
      */
@@ -305,6 +310,7 @@ export function emptyCharacter(): PF1Character {
         macroExcludedAttacks: [],
         adjustments: { enabled: [], custom: [] },
         resources: [],
+        untrackedResources: [],
         spellMacros: { enabled: [], formulas: {} },
         notes: "",
         importedAt: undefined,

@@ -115,3 +115,36 @@ export function syncResources(
     if (removed.length) parts.push(`removed ${removed.join(", ")}`);
     return { resources: out, summary: parts.length ? `Trackers: ${parts.join("; ")}.` : "" };
 }
+
+/** The resource key a Hero Lab name maps to (the parser's rule): "Darkness (3/day)" -> "res:darkness". */
+export function resourceKeyForName(name: string): string {
+    return `res:${name
+        .replace(/\s*\(.*$/, "")
+        .trim()
+        .toLowerCase()}`;
+}
+
+/**
+ * syncResources for the resources that are switched on (not in `untracked`): a switched-off resource
+ * that has a tracker loses it, a switched-on one without a tracker gets one. Returns every resource -
+ * switched-off ones with an empty uuid - so the full list stays stored with the character.
+ */
+export function syncTrackedResources(
+    api: GameApi,
+    shape: LocalId,
+    all: SheetResource[],
+    previous: SheetResource[],
+    untracked: string[],
+    visible: boolean,
+): ResourceSyncOutcome {
+    const off = new Set(untracked);
+    const result = syncResources(
+        api,
+        shape,
+        all.filter((r) => !off.has(r.key)),
+        previous,
+        visible,
+    );
+    const synced = new Map(result.resources.map((r) => [r.key, r]));
+    return { resources: all.map((r) => synced.get(r.key) ?? { ...r, uuid: "" }), summary: result.summary };
+}

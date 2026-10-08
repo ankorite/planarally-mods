@@ -129,7 +129,8 @@ from imports made before this version count as melee until the character is re-i
 ## Spells
 
 The **Spells** tab lists each spellcasting class (caster level, concentration, slots per day) with its
-spells grouped by level: DC (hover for the save), range, duration, and the rules text on hover (ⓘ).
+spells grouped by level. Each spell shows its DC (hover for the save), range and duration under its
+name, a short excerpt, and the full rules text on hover (ⓘ).
 It only appears when the character or creature has spells.
 
 Each spell has a **Macro** checkbox, a formula and a **Roll** button. Hero Lab doesn't export a spell's
@@ -160,6 +161,10 @@ import and with **Create / update trackers on the token** on the Core tab, which
   adding a second one. Other hand-made trackers, and the HP tracker, are never touched.
 - They aren't drawn as bars on the token. On a character they're visible to everyone; on a monster
   or NPC only the DM sees them.
+- Each one can be switched off with its **Track** checkbox on the Specials tab, next to the ability
+  (spell slots and anything else without a matching special are listed under "Other trackers").
+  Unticking removes the tracker from the token; ticking adds it back. The choice is kept when you
+  re-import.
 
 ## HP tracker
 

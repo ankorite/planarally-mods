@@ -33,6 +33,8 @@ import {
     type AdjustmentState,
     type AdjustmentTarget,
     type PF1Character,
+    type SheetResource,
+    type SpecialEntry,
     type SpellcastingClass,
     type SpellEntry,
 } from "./data";
@@ -40,7 +42,7 @@ import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
-import { syncResources } from "./resources";
+import { resourceKeyForName, syncTrackedResources } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { pushHp, type HpPushResult } from "./trackers";
@@ -337,6 +339,9 @@ async function onFileSelected(event: Event): Promise<void> {
             enabled: prevSpellMacros.enabled.filter((k) => spellKeys.has(k)),
             formulas: Object.fromEntries(Object.entries(prevSpellMacros.formulas).filter(([k]) => spellKeys.has(k))),
         };
+        // And the trackers switched off on the Specials tab.
+        const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
+        character.untrackedResources = (data.value.untrackedResources ?? []).filter((k) => resourceKeys.has(k));
         const attackNames = new Set(character.combat.attacks.map((a) => a.name));
         character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
@@ -356,11 +361,12 @@ async function onFileSelected(event: Event): Promise<void> {
             }
             // Same for the x/day, x/round and spell-slot trackers.
             try {
-                const result = syncResources(
+                const result = syncTrackedResources(
                     api,
                     id,
                     character.resources ?? [],
                     data.value.resources ?? [],
+                    character.untrackedResources ?? [],
                     isCharacter.value,
                 );
                 character.resources = result.resources;
@@ -596,27 +602,71 @@ function clearCustomData(): void {
 const resourceStatus = ref("");
 let resourceStatusTimeout: ReturnType<typeof setTimeout> | undefined;
 
-/** The Core tab's button: (re)create missing x/day, x/round and slot trackers, without a re-import. */
-function resyncResources(): void {
+/**
+ * Brings the token's trackers in line with the sheet: the Core tab's button (re)creates missing ones,
+ * and the Specials tab's Track checkboxes add or remove one. Returns the status text.
+ */
+function syncTrackersNow(): string {
     const id = currentLocalId.value;
-    let text: string;
-    if (id === undefined) {
-        text = "No token selected.";
-    } else {
-        try {
-            const current = data.value.resources ?? [];
-            const result = syncResources(api, id, current, current, isCharacter.value);
-            data.value.resources = result.resources;
-            save();
-            text = result.summary || (current.length ? "Trackers are already up to date." : "No trackers to create.");
-        } catch (e) {
-            console.error("[pf1e-sheet] tracker resync failed", e);
-            text = "Tracker sync failed - see the console.";
-        }
+    if (id === undefined) return "No token selected.";
+    try {
+        const current = data.value.resources ?? [];
+        const result = syncTrackedResources(
+            api,
+            id,
+            current,
+            current,
+            data.value.untrackedResources ?? [],
+            isCharacter.value,
+        );
+        data.value.resources = result.resources;
+        save();
+        return result.summary || (current.length ? "Trackers are already up to date." : "No trackers to create.");
+    } catch (e) {
+        console.error("[pf1e-sheet] tracker sync failed", e);
+        return "Tracker sync failed - see the console.";
     }
+}
+
+function flashResourceStatus(text: string): void {
     resourceStatus.value = text;
     clearTimeout(resourceStatusTimeout);
     resourceStatusTimeout = setTimeout(() => (resourceStatus.value = ""), 6000);
+}
+
+/** The Core tab's button: (re)create missing x/day, x/round and slot trackers, without a re-import. */
+function resyncResources(): void {
+    flashResourceStatus(syncTrackersNow());
+}
+
+// --- Specials tab: which limited-use abilities get a tracker -----------------------------------------
+
+/** The tracked resource a special corresponds to: same name, or same name without its "(3/day)" part. */
+function resourceForSpecial(sp: SpecialEntry): SheetResource | undefined {
+    const all = data.value.resources ?? [];
+    const key = resourceKeyForName(sp.name);
+    return all.find((r) => r.name === sp.name) ?? all.find((r) => r.key === key);
+}
+
+/** Resources no special corresponds to, e.g. spell slots: listed separately on the Specials tab. */
+const otherResources = computed(() => {
+    const matched = new Set(
+        (data.value.specials ?? []).map((sp) => resourceForSpecial(sp)?.key).filter((k): k is string => !!k),
+    );
+    return (data.value.resources ?? []).filter((r) => !matched.has(r.key));
+});
+
+function isTracked(r: SheetResource): boolean {
+    return !(data.value.untrackedResources ?? []).includes(r.key);
+}
+
+function toggleTracked(r: SheetResource, on: boolean): void {
+    const off = (data.value.untrackedResources ?? []).filter((k) => k !== r.key);
+    data.value.untrackedResources = on ? off : [...off, r.key];
+    const text = syncTrackersNow();
+    flashResourceStatus(
+        text === "Trackers are already up to date." ? `${r.name}: ${on ? "tracked" : "not tracked"}.` : text,
+    );
 }
 
 const auraStatus = ref("");
@@ -1005,7 +1055,7 @@ function fmt(n: number): string {
                         <tr v-for="res of data.resources ?? []" :key="res.key">
                             <td>{{ res.name }}</td>
                             <td>{{ res.max }}</td>
-                            <td>{{ res.uuid ? "yes" : "no" }}</td>
+                            <td>{{ !isTracked(res) ? "off" : res.uuid ? "yes" : "no" }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1326,69 +1376,52 @@ function fmt(n: number): string {
                 </div>
                 <div v-for="group of spellsByLevel(sc.spells)" :key="group.level" class="spell-level-group">
                     <h5>Level {{ group.level }}</h5>
-                    <div class="table-wrap">
-                        <table class="spell-table">
-                            <thead>
-                                <tr>
-                                    <th>Spell</th>
-                                    <th>DC</th>
-                                    <th>Range</th>
-                                    <th>Duration</th>
-                                    <th>Macro</th>
-                                    <th>Formula</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="spell of group.spells" :key="spell.name">
-                                    <td>
-                                        <strong>{{ spell.name }}</strong>
-                                        <span
-                                            v-if="spell.fullText"
-                                            class="info-icon"
-                                            :title="spell.fullText"
-                                            aria-label="Full text"
-                                            >ⓘ</span
-                                        >
-                                        <div class="hint">{{ spell.description }}</div>
-                                    </td>
-                                    <td :title="spell.save">{{ spell.dc ?? "" }}</td>
-                                    <td>{{ spell.range ?? "" }}</td>
-                                    <td>{{ spell.duration ?? "" }}</td>
-                                    <td>
-                                        <input
-                                            type="checkbox"
-                                            :checked="isSpellMacro(sc, spell)"
-                                            :title="`Show Cast ${spell.name} in PlanarAlly's dice macros`"
-                                            @change="
-                                                toggleSpellMacro(sc, spell, ($event.target as HTMLInputElement).checked)
-                                            "
-                                        />
-                                    </td>
-                                    <td>
-                                        <input
-                                            class="spell-formula"
-                                            type="text"
-                                            :value="spellFormula(data, sc, spell)"
-                                            placeholder="e.g. 3d6"
-                                            @change="
-                                                setSpellFormula(sc, spell, ($event.target as HTMLInputElement).value)
-                                            "
-                                        />
-                                    </td>
-                                    <td class="roll-cell">
-                                        <button
-                                            type="button"
-                                            :disabled="rolling || !spellFormula(data, sc, spell).trim()"
-                                            @click="rollSpell(sc, spell)"
-                                        >
-                                            Roll
-                                        </button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <ul class="spell-rows">
+                        <li v-for="spell of group.spells" :key="spell.name" class="spell-row">
+                            <div class="spell-main">
+                                <strong>{{ spell.name }}</strong>
+                                <span
+                                    v-if="spell.fullText"
+                                    class="info-icon"
+                                    :title="spell.fullText"
+                                    aria-label="Full text"
+                                    >ⓘ</span
+                                >
+                                <div class="spell-meta">
+                                    <span v-if="spell.dc" :title="spell.save">DC {{ spell.dc }}</span>
+                                    <span v-if="spell.range">{{ spell.range }}</span>
+                                    <span v-if="spell.duration">{{ spell.duration }}</span>
+                                </div>
+                                <div class="hint">{{ spell.description }}</div>
+                            </div>
+                            <div class="spell-controls">
+                                <label :title="`Show Cast ${spell.name} in PlanarAlly's dice macros`">
+                                    <input
+                                        type="checkbox"
+                                        :checked="isSpellMacro(sc, spell)"
+                                        @change="
+                                            toggleSpellMacro(sc, spell, ($event.target as HTMLInputElement).checked)
+                                        "
+                                    />
+                                    Macro
+                                </label>
+                                <input
+                                    class="spell-formula"
+                                    type="text"
+                                    :value="spellFormula(data, sc, spell)"
+                                    placeholder="formula"
+                                    @change="setSpellFormula(sc, spell, ($event.target as HTMLInputElement).value)"
+                                />
+                                <button
+                                    type="button"
+                                    :disabled="rolling || !spellFormula(data, sc, spell).trim()"
+                                    @click="rollSpell(sc, spell)"
+                                >
+                                    Roll
+                                </button>
+                            </div>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -1397,14 +1430,46 @@ function fmt(n: number): string {
             <div v-if="!(data.specials ?? []).length" class="readonly-note">
                 No specials found - import the character from Hero Lab to fill this in.
             </div>
+            <div v-if="(data.resources ?? []).length" class="readonly-note">
+                Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day or rounds). Untick
+                one to remove its tracker; tick it to add it back.
+                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
+            </div>
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
                 <h5>{{ group.category }}</h5>
                 <ul class="feat-list">
                     <li v-for="sp of group.entries" :key="sp.name">
+                        <label v-if="resourceForSpecial(sp)" class="track-toggle" title="Keep a tracker on the token">
+                            <input
+                                type="checkbox"
+                                :checked="isTracked(resourceForSpecial(sp)!)"
+                                @change="
+                                    toggleTracked(resourceForSpecial(sp)!, ($event.target as HTMLInputElement).checked)
+                                "
+                            />
+                            Track
+                        </label>
                         <strong>{{ sp.name }}</strong>
                         <span v-if="sp.source" class="special-source">{{ sp.source }}</span>
                         <span v-if="sp.fullText" class="info-icon" :title="sp.fullText" aria-label="Full text">ⓘ</span>
                         <div class="hint">{{ sp.description }}</div>
+                    </li>
+                </ul>
+            </div>
+            <div v-if="otherResources.length" class="special-group">
+                <h5>Other trackers</h5>
+                <ul class="feat-list">
+                    <li v-for="r of otherResources" :key="r.key">
+                        <label class="track-toggle" title="Keep a tracker on the token">
+                            <input
+                                type="checkbox"
+                                :checked="isTracked(r)"
+                                @change="toggleTracked(r, ($event.target as HTMLInputElement).checked)"
+                            />
+                            Track
+                        </label>
+                        <strong>{{ r.name }}</strong>
+                        <div class="hint">{{ r.max }} per day</div>
                     </li>
                 </ul>
             </div>
@@ -1626,14 +1691,51 @@ function fmt(n: number): string {
         }
     }
 
-    .spell-table {
-        .spell-formula {
-            width: 6rem;
+    .spell-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .spell-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.25rem 0.75rem;
+        padding: 0.35rem 0;
+        border-bottom: 1px solid #ddd;
+
+        .spell-main {
+            flex: 1 1 14rem;
+            min-width: 0;
         }
 
-        td {
-            vertical-align: top;
+        .spell-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0 0.6rem;
+            color: #555;
+            font-size: 0.75rem;
         }
+
+        .spell-controls {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            white-space: nowrap;
+            font-size: 0.8rem;
+        }
+
+        .spell-formula {
+            width: 5.5rem;
+        }
+    }
+
+    .track-toggle {
+        margin-right: 0.35rem;
+        font-size: 0.75rem;
+        white-space: nowrap;
     }
 
     .custom-adjustment-form {
