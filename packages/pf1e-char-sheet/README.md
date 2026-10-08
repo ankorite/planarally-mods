@@ -148,10 +148,15 @@ you re-import.
 
 ## Trackers for limited-use abilities
 
-Hero Lab exports every x/day and x/round ability as a tracked resource ("Darkness (3/day)", "Bardic
-Performance (20 rounds/day)"). Each becomes a PlanarAlly tracker on the token, as does each spell
-level's slots per day ("Oracle level 1 slots"), so uses can be ticked off in play. They're created on
-import and with **Create / update trackers on the token** on the Core tab, which lists them.
+Hero Lab exports every limited-use ability and charged item as a tracked resource ("Darkness (3/day)",
+"Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each becomes a
+PlanarAlly tracker on the token, as does each spell level's slots per day ("Oracle level 1 slots"), so
+uses can be ticked off in play. They're created on import and with **Create / update trackers on the
+token** on the Core tab, which lists them with how their uses work: "3 per day", "20 rounds per day",
+"1 per week", "50 charges" (wands, staffs, rods and anything named with charges), otherwise "N uses".
+
+Trackers never refill on their own, which is right for charges (a wand's don't come back). Reset the
+daily ones yourself after a rest.
 
 - New trackers start at the uses left in the Hero Lab export.
 - Re-importing never refills or overwrites a tracker's current value. It updates the maximum, follows

@@ -148,3 +148,19 @@ export function syncTrackedResources(
     const synced = new Map(result.resources.map((r) => [r.key, r]));
     return { resources: all.map((r) => synced.get(r.key) ?? { ...r, uuid: "" }), summary: result.summary };
 }
+
+/**
+ * How a resource's uses come back, for labels: "4 per day", "20 rounds per day", "50 charges". Hero
+ * Lab's tracked resources mix daily abilities with items that have charges (wands), which never
+ * recharge, so the label follows the name rather than assuming "per day". Trackers never refill on
+ * their own either way: only a fresh tracker starts full.
+ */
+export function resourceLabel(r: Pick<SheetResource, "key" | "name" | "max">): string {
+    const name = r.name.toLowerCase();
+    if (r.key.startsWith("slots:")) return `${r.max} per day`;
+    if (/rounds?\s*(?:\/|per\s+)day/.test(name)) return `${r.max} rounds per day`;
+    if (/(?:\/|per\s+)day\b/.test(name)) return `${r.max} per day`;
+    if (/(?:\/|per\s+)week\b/.test(name)) return `${r.max} per week`;
+    if (/\bcharges?\b|\bwand\b|\bstaff\b|\brod\b/.test(name)) return `${r.max} charges`;
+    return `${r.max} uses`;
+}
