@@ -31,6 +31,7 @@ import {
     type AttackEntry,
     type FeatEntry,
     type InventoryItem,
+    type MythicTier,
     type PF1Character,
     type SheetAura,
     type SheetResource,
@@ -142,12 +143,33 @@ function parseIdentity(character: Element, out: PF1Character): void {
     out.currency.gp = num(attr(own(character, "money"), "gp"));
 }
 
+const MYTHIC_PATHS = ["archmage", "champion", "guardian", "hierophant", "marshal", "trickster"];
+
 function parseClasses(character: Element, out: PF1Character): void {
-    out.classes = ownAll(own(character, "classes"), "class").map((cls) => ({
+    const classes = own(character, "classes");
+    out.classes = ownAll(classes, "class").map((cls) => ({
         name: attr(cls, "name"),
         level: num(attr(cls, "level")),
         archetypes: [],
     }));
+    out.mythic = parseMythic(attr(classes, "summary"), out.classes);
+}
+
+/**
+ * The mythic path and tier. Hero Lab has no <class> element for a mythic path; it only shows up in
+ * the classes summary: "oracle (dual-cursed oracle) 4/paladin (hospitaler) 3/Hierophant 1".
+ */
+function parseMythic(summary: string, classes: { name: string }[]): MythicTier | undefined {
+    const known = new Set(classes.map((c) => c.name.trim().toLowerCase()));
+    for (const part of summary.split("/")) {
+        const m = /^\s*(.+?)\s+(\d+)\s*$/.exec(part);
+        if (!m) continue;
+        const name = m[1]!.trim();
+        const lower = name.toLowerCase();
+        if (known.has(lower)) continue;
+        if (MYTHIC_PATHS.includes(lower) || /\bmythic\b/.test(lower)) return { path: name, tier: Number(m[2]) };
+    }
+    return undefined;
 }
 
 function parseAbilities(character: Element, out: PF1Character): void {

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## [2026-10-09]
+
+- pf1e-char-sheet v0.22.0-beta.2: the mythic path and tier are imported (Hero Lab only lists them
+  in the class summary, e.g. "Hierophant 1") and shown in the Classes table on the Core tab
+
 ## [2026-10-08]
 
 - pf1e-char-sheet v0.22.0-beta.1, the first beta release:

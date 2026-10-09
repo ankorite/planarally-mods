@@ -1018,6 +1018,14 @@ function fmt(n: number): string {
                                 <span class="val">{{ cls.level }}</span>
                             </td>
                         </tr>
+                        <tr v-if="data.mythic">
+                            <td>
+                                <span class="val">{{ data.mythic.path }}</span> (mythic path)
+                            </td>
+                            <td>
+                                <span class="val">Tier {{ data.mythic.tier }}</span>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
