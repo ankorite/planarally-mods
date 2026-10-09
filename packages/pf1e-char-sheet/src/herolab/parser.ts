@@ -426,9 +426,16 @@ function parseInventory(character: Element, out: PF1Character): void {
 //   <auras>   "Aura of Courage +4 (10 ft.) (Su)"              -> a visible radius aura
 // (Both are read with `own`, so a mount's or companion's senses never become the rider's.)
 // Senses with no range (Low-Light Vision, Scent, Deaf) and auras with no radius are skipped.
+//
+// A few abilities outside <auras> work at a range around the character, so they get a radius aura
+// too (RANGED_ABILITIES, matched on the shortname): "Life Link (4 max bonds, 140 feet) (Su)" in
+// <otherspecials> -> a 140 ft "Life Link" aura showing how far the bonds reach.
 
 const FEET_RE = /(\d+)\s*[- ]?\s*(?:ft|feet|foot)\b/i;
 const VISION_RE = /\b(darkvision|blindsight)\b[^0-9]{0,16}?(\d+)\s*[- ]?\s*(?:ft|feet|foot)\b/i;
+
+const RANGED_ABILITIES = new Set(["life link"]);
+const RANGED_ABILITY_CONTAINERS = ["defensive", "attack", "spelllike", "otherspecials"];
 
 function slug(name: string): string {
     return name
@@ -467,6 +474,15 @@ function parseAuras(character: Element, out: PF1Character): void {
             attr(sp, "shortname") ||
             full.replace(/\s*\([^)]*\b(?:ft|feet|foot)\b[^)]*\)/gi, "").replace(/\s*\((?:su|ex|sp)\)\s*$/i, "");
         add("effect", name.trim(), Number(radius[1]));
+    }
+
+    for (const tag of RANGED_ABILITY_CONTAINERS) {
+        for (const sp of ownAll(own(character, tag), "special")) {
+            const name = (attr(sp, "shortname") || attr(sp, "name").replace(/\s*\(.*$/, "")).trim();
+            if (!RANGED_ABILITIES.has(name.toLowerCase())) continue;
+            const radius = FEET_RE.exec(attr(sp, "name"));
+            if (radius?.[1]) add("effect", name, Number(radius[1]));
+        }
     }
 
     out.auras = Array.from(found.values());

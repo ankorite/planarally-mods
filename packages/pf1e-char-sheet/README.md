@@ -305,6 +305,8 @@ Auras are created from the Hero Lab specials:
 - **Senses** with a range (Darkvision, Blindsight) become a vision aura of that radius, not drawn.
   Senses without a range (Low-Light Vision, Scent) are skipped.
 - **Auras** with a radius (e.g. Aura of Courage, 10 ft.) become a visible translucent radius aura.
+- A few **ranged abilities** listed elsewhere in Hero Lab get the same kind of aura for their range:
+  currently the oracle's **Life Link** (e.g. 140 ft., the reach of its bonds).
 
 The Core tab lists them with a **Create / update auras on the token** button. The sheet only manages
 auras it created: re-importing updates changed radii, removes auras Hero Lab no longer lists and

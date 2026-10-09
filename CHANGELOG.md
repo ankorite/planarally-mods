@@ -2,6 +2,8 @@
 
 ## [2026-10-09]
 
+- pf1e-char-sheet v0.22.0-beta.3: the oracle's Life Link becomes a radius aura for its range (e.g.
+  140 ft.); Hero Lab lists it under other abilities, not auras
 - pf1e-char-sheet v0.22.0-beta.2: the mythic path and tier are imported (Hero Lab only lists them
   in the class summary, e.g. "Hierophant 1") and shown in the Classes table on the Core tab
 
