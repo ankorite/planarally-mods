@@ -93,6 +93,12 @@ export interface ClassLevel {
     archetypes: string[];
 }
 
+export interface MythicTier {
+    /** "Hierophant", "Archmage", ... */
+    path: string;
+    tier: number;
+}
+
 export interface SaveBlock {
     // The "base" save from class tables, before ability/misc modifiers.
     base: number;
@@ -223,6 +229,8 @@ export type PF1Character = {
         gender: string;
     };
     classes: ClassLevel[];
+    /** Mythic path and tier (Mythic Adventures); absent for a non-mythic character. */
+    mythic?: MythicTier;
     abilities: AbilityScores;
     combat: {
         hp: { max: number; current: number; nonlethal: number };

@@ -604,6 +604,7 @@ export async function buildHealthCheck(
         if (!c.identity.name) bad("no character imported on this token");
         ok(`name: ${c.identity.name || "(none)"}`);
         ok(`classes: ${c.classes.map((k) => `${k.name} ${k.level}`).join(", ") || "(none)"}`);
+        if (c.mythic) ok(`mythic: ${c.mythic.path} tier ${c.mythic.tier}`);
         ok(`imported: ${c.importedAt ?? "(never)"}`);
         ok(
             `counts: ${c.skills.length} skills, ${c.combat.attacks.length} attacks, ${c.feats.length} feats, ` +

@@ -101,7 +101,7 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 
 On import the sheet is filled with:
 
-- identity, classes, ability scores
+- identity, classes and mythic path/tier (read from the class summary, as Hero Lab has no element for it), ability scores
 - HP, AC (normal / touch / flat-footed), saves, BAB, CMB/CMD, initiative, speed
 - melee and ranged attacks
 - skills (ranks, class-skill flag, trained-only, total)
