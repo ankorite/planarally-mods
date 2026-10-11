@@ -273,8 +273,14 @@ export type PF1Character = {
     /** Tracked resources (x/day, x/round, spell slots). Optional for older saves. */
     resources?: SheetResource[];
     /**
-     * Keys of the resources switched off on the Specials tab: they get no tracker on the token.
-     * Resources are tracked unless listed here; kept across re-imports. Optional for older saves.
+     * Keys of the resources with Track ticked: only these get a tracker on the token. Resources are
+     * untracked until ticked; kept across re-imports. Read it through trackedKeys() (resources.ts),
+     * which also handles older saves.
+     */
+    trackedResources?: string[];
+    /**
+     * Older saves (before 0.22.0-beta.3): resources were tracked unless listed here. Only read to
+     * carry an older sheet's choice over to `trackedResources`; never written any more.
      */
     untrackedResources?: string[];
     /**
@@ -328,7 +334,7 @@ export function emptyCharacter(): PF1Character {
         macroExcludedAttacks: [],
         adjustments: { enabled: [], custom: [] },
         resources: [],
-        untrackedResources: [],
+        trackedResources: [],
         macroExcludedRolls: [],
         spellMacros: { enabled: [], formulas: {} },
         notes: "",

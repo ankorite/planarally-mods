@@ -1,6 +1,6 @@
 import type { GameApi, LocalId, Sync, TrackerId } from "@planarally/mod-api";
 
-import type { SheetResource } from "./data";
+import type { PF1Character, SheetResource } from "./data";
 import { isHpTrackerName, newUuid, realTrackers } from "./trackers";
 
 // Keeps the character's limited-use abilities (Hero Lab's tracked resources: x/day, x/round) and
@@ -140,8 +140,19 @@ export function resourceKeyForName(name: string): string {
 }
 
 /**
- * syncResources for the resources that are switched on (not in `untracked`): a switched-off resource
- * that has a tracker loses it, a switched-on one without a tracker gets one. Returns every resource -
+ * The keys of the resources with Track ticked. New sheets track nothing until ticked; a sheet saved
+ * before that (it has `untrackedResources` instead) keeps tracking what it tracked.
+ */
+export function trackedKeys(c: Pick<PF1Character, "resources" | "trackedResources" | "untrackedResources">): string[] {
+    if (c.trackedResources) return c.trackedResources;
+    if (!c.untrackedResources) return [];
+    const off = new Set(c.untrackedResources);
+    return (c.resources ?? []).map((r) => r.key).filter((k) => !off.has(k));
+}
+
+/**
+ * syncResources for the resources that are switched on (in `tracked`): a switched-off resource that
+ * has a tracker loses it, a switched-on one without a tracker gets one. Returns every resource -
  * switched-off ones with an empty uuid - so the full list stays stored with the character.
  */
 export function syncTrackedResources(
@@ -149,10 +160,10 @@ export function syncTrackedResources(
     shape: LocalId,
     all: SheetResource[],
     previous: SheetResource[],
-    untracked: string[],
+    tracked: string[],
     visible: boolean,
 ): ResourceSyncOutcome {
-    const off = new Set(untracked);
+    const on = new Set(tracked);
     // A tracker about to be removed hands its count to the sheet first.
     const live = new Map<string, number>((realTrackers(api)?.getAll(shape) ?? []).map((t) => [t.uuid, t.value]));
     all = all.map((r) => {
@@ -162,7 +173,7 @@ export function syncTrackedResources(
     const result = syncResources(
         api,
         shape,
-        all.filter((r) => !off.has(r.key)),
+        all.filter((r) => on.has(r.key)),
         previous,
         visible,
     );

@@ -51,6 +51,7 @@ import {
     resourceKeyForName,
     resourceLabel,
     syncTrackedResources,
+    trackedKeys,
     usesLeft,
 } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
@@ -392,7 +393,8 @@ async function onFileSelected(event: Event): Promise<void> {
         character.macroExcludedRolls = [...(data.value.macroExcludedRolls ?? [])];
         // And the trackers switched off on the Specials tab.
         const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
-        character.untrackedResources = (data.value.untrackedResources ?? []).filter((k) => resourceKeys.has(k));
+        character.trackedResources = trackedKeys(data.value).filter((k) => resourceKeys.has(k));
+        delete character.untrackedResources;
         const attackNames = new Set(character.combat.attacks.map((a) => a.name));
         character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
@@ -417,11 +419,17 @@ async function onFileSelected(event: Event): Promise<void> {
                     id,
                     character.resources ?? [],
                     data.value.resources ?? [],
-                    character.untrackedResources ?? [],
+                    character.trackedResources ?? [],
                     isCharacter.value,
                 );
                 character.resources = result.resources;
                 if (result.summary) notes.push(result.summary);
+                const count = character.resources.length;
+                if (count && !(character.trackedResources ?? []).length) {
+                    notes.push(
+                        `${count} limited-use resource${count === 1 ? "" : "s"} on the Resources tab - tick Track to put one on the token.`,
+                    );
+                }
             } catch (e) {
                 console.error("[pf1e-sheet] tracker sync after import failed", e);
                 notes.push("Tracker sync failed - see the console.");
@@ -673,17 +681,12 @@ function syncTrackersNow(): string {
     if (id === undefined) return "No token selected.";
     try {
         const current = data.value.resources ?? [];
-        const result = syncTrackedResources(
-            api,
-            id,
-            current,
-            current,
-            data.value.untrackedResources ?? [],
-            isCharacter.value,
-        );
+        const result = syncTrackedResources(api, id, current, current, trackedKeys(data.value), isCharacter.value);
         data.value.resources = result.resources;
         save();
-        return result.summary || (current.length ? "Trackers are already up to date." : "No trackers to create.");
+        if (result.summary) return result.summary;
+        if (!trackedKeys(data.value).length) return "Nothing is tracked - tick Track on a resource to add its tracker.";
+        return "Trackers are already up to date.";
     } catch (e) {
         console.error("[pf1e-sheet] tracker sync failed", e);
         return "Tracker sync failed - see the console.";
@@ -719,12 +722,13 @@ const otherResources = computed(() => {
 });
 
 function isTracked(r: SheetResource): boolean {
-    return !(data.value.untrackedResources ?? []).includes(r.key);
+    return trackedKeys(data.value).includes(r.key);
 }
 
 function toggleTracked(r: SheetResource, on: boolean): void {
-    const off = (data.value.untrackedResources ?? []).filter((k) => k !== r.key);
-    data.value.untrackedResources = on ? off : [...off, r.key];
+    const rest = trackedKeys(data.value).filter((k) => k !== r.key);
+    data.value.trackedResources = on ? [...rest, r.key] : rest;
+    delete data.value.untrackedResources;
     const text = syncTrackersNow();
     flashResourceStatus(
         text === "Trackers are already up to date." ? `${r.name}: ${on ? "tracked" : "not tracked"}.` : text,
@@ -1517,8 +1521,8 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Resources'" class="pf1e-panel">
             <div class="readonly-note">
-                Uses left are kept on the sheet for every resource. With <strong>Track</strong> ticked the resource also
-                has a tracker on the token, and the two stay in step both ways. Nothing refills on its own:
+                Uses left are kept on the sheet for every resource. Tick <strong>Track</strong> to also put a resource
+                on the token as a tracker; the two then stay in step both ways. Nothing refills on its own:
                 <strong>New day</strong> refills the daily ones (x/day, rounds/day, spell slots) but not charges.
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
             </div>
@@ -1587,9 +1591,9 @@ function fmt(n: number): string {
                 No specials found - import the character from Hero Lab to fill this in.
             </div>
             <div v-if="(data.resources ?? []).length" class="readonly-note">
-                Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day, rounds or
-                charges). Untick one to remove its tracker; tick it to add it back. The Resources tab counts uses either
-                way and has a <strong>New day</strong> button.
+                Tick <strong>Track</strong> on an ability to put a tracker for it on the token (uses per day, rounds or
+                charges); untick it to remove the tracker. The Resources tab counts uses either way and has a
+                <strong>New day</strong> button.
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
             </div>
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">

@@ -8,6 +8,8 @@
       tracked one stays in step with its tracker both ways. **New day** refills the daily ones
       (not charges). Re-importing the same character keeps the uses left. The trackers list moved
       here from the Core tab
+    - trackers are opt-in: a resource only gets a tracker on the token once its **Track** box is
+      ticked (sheets imported before keep the trackers they have)
     - the Initiative, Fortitude, Reflex and Will dice macros can each be switched off on the Combat
       tab
     - the update banner links straight to the GitHub Releases page

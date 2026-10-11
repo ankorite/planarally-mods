@@ -206,10 +206,10 @@ you re-import.
 ## Trackers for limited-use abilities
 
 Hero Lab exports every limited-use ability and charged item as a tracked resource ("Darkness (3/day)",
-"Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each becomes a
-PlanarAlly tracker on the token, as does each spell level's slots per day ("Oracle level 1 slots"), so
-uses can be ticked off in play. They're created on import and with **Create / update trackers on the
-token** on the Resources tab.
+"Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each of them, and
+each spell level's slots per day ("Oracle level 1 slots"), is counted on the Resources tab, and any of
+them can also be put on the token as a PlanarAlly tracker by ticking its **Track** box. Nothing is
+tracked on the token until you tick it, so the token only gets the trackers you want.
 
 ### Resources tab
 
@@ -218,7 +218,7 @@ day", "20 rounds per day", "1 per week", "50 charges" for wands, staffs, rods an
 charges, otherwise "N uses") and the **uses left**, with − / + buttons and a field to type a number.
 
 - The sheet keeps the uses left for every resource, whether or not it has a tracker on the token.
-- With **Track** ticked the resource also has a tracker on the token, and the two stay in step both
+- With **Track** ticked (it starts unticked) the resource also has a tracker on the token, and the two stay in step both
   ways: using one on the sheet updates the tracker, and changing the tracker in PlanarAlly updates
   the sheet. Unticking removes the tracker but keeps the count; ticking again makes a tracker that
   starts from the sheet's count.
@@ -237,11 +237,14 @@ charges, otherwise "N uses") and the **uses left**, with − / + buttons and a f
   adding a second one. Other hand-made trackers, and the HP tracker, are never touched.
 - They aren't drawn as bars on the token. On a character they're visible to everyone; on a monster
   or NPC only the DM sees them.
-- Each one can be switched off with its **Track** checkbox on the Resources tab, or on the Specials
-  tab next to the ability (spell slots and anything else without a matching special are listed there
-  under "Other trackers").
-  Unticking removes the tracker from the token; ticking adds it back. The choice is kept when you
-  re-import.
+- Each one is switched on with its **Track** checkbox on the Resources tab, or on the Specials tab
+  next to the ability (spell slots and anything else without a matching special are listed there
+  under "Other trackers"). Ticking adds the tracker; unticking removes it from the token. The choice
+  is kept when you re-import; a resource new in the export starts unticked.
+- Sheets imported before 0.22.0-beta.3, when everything was tracked by default, keep the trackers
+  they have.
+- **Create / update trackers on the token** on the Resources tab re-creates a ticked resource's
+  tracker if it was deleted, and fixes maximums, without a re-import.
 
 ## HP tracker
 
