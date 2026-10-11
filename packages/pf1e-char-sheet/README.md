@@ -82,9 +82,9 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/main.ts` — entry point: registers the shape tab and the tracker → sheet HP sync
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
-- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Adjustments / Feats / Spells / Specials /
-  Inventory tabs, or Core / Combat / Skills / Adjustments / Spells / Specials for a monster/NPC; Spells only
-  when there are spells)
+- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Adjustments / Feats / Spells / Resources /
+  Specials / Inventory tabs, or Core / Combat / Skills / Adjustments / Spells / Resources / Specials for a
+  monster/NPC; Spells and Resources only when there are spells / limited-use resources)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -138,6 +138,7 @@ macros) but only has these tabs:
 - **Skills**: skills with roll buttons and the Macro column
 - **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
 - **Spells**: only when it has spells, as on the full sheet (see Spells)
+- **Resources**: only when it has limited-use abilities or spell slots, as on the full sheet
 - **Specials**: Hero Lab's special abilities
 
 **Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
@@ -208,13 +209,27 @@ Hero Lab exports every limited-use ability and charged item as a tracked resourc
 "Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each becomes a
 PlanarAlly tracker on the token, as does each spell level's slots per day ("Oracle level 1 slots"), so
 uses can be ticked off in play. They're created on import and with **Create / update trackers on the
-token** on the Core tab, which lists them with how their uses work: "3 per day", "20 rounds per day",
-"1 per week", "50 charges" (wands, staffs, rods and anything named with charges), otherwise "N uses".
+token** on the Resources tab.
 
-Trackers never refill on their own, which is right for charges (a wand's don't come back). Reset the
-daily ones yourself after a rest.
+### Resources tab
 
-- New trackers start at the uses left in the Hero Lab export.
+The **Resources** tab (shown when there are any) lists every resource with how its uses work ("3 per
+day", "20 rounds per day", "1 per week", "50 charges" for wands, staffs, rods and anything named with
+charges, otherwise "N uses") and the **uses left**, with − / + buttons and a field to type a number.
+
+- The sheet keeps the uses left for every resource, whether or not it has a tracker on the token.
+- With **Track** ticked the resource also has a tracker on the token, and the two stay in step both
+  ways: using one on the sheet updates the tracker, and changing the tracker in PlanarAlly updates
+  the sheet. Unticking removes the tracker but keeps the count; ticking again makes a tracker that
+  starts from the sheet's count.
+- Nothing refills on its own, which is right for charges (a wand's don't come back). **New day**
+  refills the daily ones (x/day, rounds/day, spell slots) and leaves charges and plain uses alone.
+- Re-importing the same character keeps the uses left (full stays full at a new maximum, otherwise
+  capped at it). A new resource, or a different character, starts at Hero Lab's uses left.
+
+### Trackers on the token
+
+- New trackers start at the sheet's uses left (at first, the uses left in the Hero Lab export).
 - Re-importing never refills or overwrites a tracker's current value. It updates the maximum, follows
   Hero Lab's name ("20 rounds/day" → "22 rounds/day") unless you renamed the tracker, creates missing
   ones and removes the ones it made for abilities that are gone.
@@ -222,8 +237,9 @@ daily ones yourself after a rest.
   adding a second one. Other hand-made trackers, and the HP tracker, are never touched.
 - They aren't drawn as bars on the token. On a character they're visible to everyone; on a monster
   or NPC only the DM sees them.
-- Each one can be switched off with its **Track** checkbox on the Specials tab, next to the ability
-  (spell slots and anything else without a matching special are listed under "Other trackers").
+- Each one can be switched off with its **Track** checkbox on the Resources tab, or on the Specials
+  tab next to the ability (spell slots and anything else without a matching special are listed there
+  under "Other trackers").
   Unticking removes the tracker from the token; ticking adds it back. The choice is kept when you
   re-import.
 
@@ -277,7 +293,8 @@ What is written:
 - `/attacks`: per weapon, `Atk <weapon>` (the first attack bonus; later iterative attacks are offsets
   from it, so one edit moves them all).
 - Roll macros, at the top level rather than in a branch:
-    - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`
+    - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`, each of which can be switched
+      off with the **Dice macros** checkboxes under the Combat tab's saves (the buttons keep working)
     - per weapon, `Roll Attack <weapon>` (`1d20 + {Atk <weapon>}`), or one per attack for iterative
       attacks (`+13/+8/+3` → `Roll Attack <weapon> 1st|2nd|3rd`: `1d20 + {Atk <weapon>}`, `... - 5`,
       `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6").

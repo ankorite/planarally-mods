@@ -12,6 +12,10 @@ import { isHpTrackerName, newUuid, realTrackers } from "./trackers";
 // manages for resources that are gone - it never refills or overwrites the current value (except to
 // clamp it to a lower maximum).
 //
+// The sheet keeps every resource's uses left itself (`left`), tracker or not, so switching a tracker
+// off and on again doesn't lose count. A tracker that exists is the truth for its resource (it may
+// have been changed in PlanarAlly); a new tracker starts from the sheet's count.
+//
 // A resource the sheet doesn't manage yet first adopts an existing tracker with exactly its name, so
 // a token that already has a hand-made "Darkness (3/day)" doesn't get a second one. Every other
 // tracker made by hand, and the HP tracker, is never touched.
@@ -65,9 +69,10 @@ export function syncResources(
         }
         if (existing) {
             const delta: { maxvalue?: number; value?: number; name?: string } = {};
+            let left = existing.value;
             if (existing.maxvalue !== want.max) {
                 delta.maxvalue = want.max;
-                if (existing.value > want.max) delta.value = want.max;
+                if (existing.value > want.max) delta.value = left = want.max;
             }
             // Follow Hero Lab's name ("20 rounds/day" -> "22 rounds/day") unless it was renamed in PA.
             if (prev && existing.name === prev.name && existing.name !== want.name) delta.name = want.name;
@@ -75,7 +80,11 @@ export function syncResources(
                 trackers.update(shape, existing.uuid, delta, sync);
                 updated.push(`${want.name} (max ${want.max})`);
             }
-            out.push({ ...want, uuid: existing.uuid });
+            out.push({
+                ...want,
+                uuid: existing.uuid,
+                left: Number.isFinite(left) ? Math.max(0, left) : usesLeft(want),
+            });
         } else {
             // A resource named "HP" would be adopted as the HP tracker by name; never create one.
             if (isHpTrackerName(want.name)) continue;
@@ -85,7 +94,7 @@ export function syncResources(
                 {
                     uuid,
                     name: want.name,
-                    value: want.max - want.used,
+                    value: usesLeft(want),
                     maxvalue: want.max,
                     visible,
                     draw: false,
@@ -109,7 +118,7 @@ export function syncResources(
         }
     }
 
-    // Name a few; past that just count them (the Core tab lists every tracker).
+    // Name a few; past that just count them (the Resources tab lists every one).
     const list = (names: string[]): string => (names.length <= 5 ? ` (${names.join(", ")})` : "");
     const parts: string[] = [];
     if (created.length) parts.push(`created ${created.length}${list(created)}`);
@@ -118,7 +127,7 @@ export function syncResources(
     const many = created.length > 5 || updated.length > 5 || removed.length > 5;
     return {
         resources: out,
-        summary: parts.length ? `Trackers: ${parts.join("; ")}${many ? " - listed on the Core tab" : ""}.` : "",
+        summary: parts.length ? `Trackers: ${parts.join("; ")}${many ? " - listed on the Resources tab" : ""}.` : "",
     };
 }
 
@@ -144,6 +153,12 @@ export function syncTrackedResources(
     visible: boolean,
 ): ResourceSyncOutcome {
     const off = new Set(untracked);
+    // A tracker about to be removed hands its count to the sheet first.
+    const live = new Map<string, number>((realTrackers(api)?.getAll(shape) ?? []).map((t) => [t.uuid, t.value]));
+    all = all.map((r) => {
+        const value = r.uuid ? live.get(r.uuid) : undefined;
+        return value !== undefined && Number.isFinite(value) ? { ...r, left: Math.max(0, Math.min(r.max, value)) } : r;
+    });
     const result = syncResources(
         api,
         shape,
@@ -169,4 +184,40 @@ export function resourceLabel(r: Pick<SheetResource, "key" | "name" | "max">): s
     if (/(?:\/|per\s+)week\b/.test(name)) return `${r.max} per week`;
     if (/\bcharges?\b|\bwand\b|\bstaff\b|\brod\b/.test(name)) return `${r.max} charges`;
     return `${r.max} uses`;
+}
+
+/** Uses left on the sheet: the kept count, or what Hero Lab exported, within 0..max. */
+export function usesLeft(r: Pick<SheetResource, "max" | "used" | "left">): number {
+    const left = r.left ?? r.max - r.used;
+    return Math.min(r.max, Math.max(0, Number.isFinite(left) ? left : r.max));
+}
+
+/**
+ * On a re-import, keeps the uses left of the resources the character already had (matched by key):
+ * full stays full at the new maximum, otherwise the count is kept, capped at the new maximum. New
+ * resources start from Hero Lab's numbers.
+ */
+export function carryUsesLeft(next: SheetResource[], prev: SheetResource[]): SheetResource[] {
+    const byKey = new Map(prev.map((r) => [r.key, r]));
+    return next.map((r) => {
+        const old = byKey.get(r.key);
+        if (!old || old.left === undefined) return r;
+        const was = usesLeft(old);
+        return { ...r, left: was >= old.max ? r.max : Math.min(was, r.max) };
+    });
+}
+
+/** Whether a resource comes back after a night's rest (x/day, rounds/day, spell slots), not charges. */
+export function refillsDaily(r: Pick<SheetResource, "key" | "name" | "max">): boolean {
+    return resourceLabel(r).endsWith(" per day");
+}
+
+/** Sets a resource's tracker on the token to `left`, if it has one. Returns whether it did. */
+export function pushUsesLeft(api: GameApi, shape: LocalId, r: SheetResource, left: number): boolean {
+    if (!r.uuid) return false;
+    const trackers = realTrackers(api);
+    const live = trackers?.getAll(shape).find((t) => t.uuid === r.uuid);
+    if (!trackers || !live) return false;
+    if (live.value !== left) trackers.update(shape, r.uuid as TrackerId, { value: left }, { ui: true, server: true });
+    return true;
 }

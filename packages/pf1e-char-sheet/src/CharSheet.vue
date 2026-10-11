@@ -22,7 +22,9 @@ import {
     iterativeBonuses,
     ordinal,
     removeCustomData,
+    ROLL_MACROS,
     syncCustomData,
+    type RollMacro,
 } from "./customdata";
 import {
     abilityModifier,
@@ -42,7 +44,15 @@ import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
-import { resourceKeyForName, resourceLabel, syncTrackedResources } from "./resources";
+import {
+    carryUsesLeft,
+    pushUsesLeft,
+    refillsDaily,
+    resourceKeyForName,
+    resourceLabel,
+    syncTrackedResources,
+    usesLeft,
+} from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
@@ -194,8 +204,18 @@ function setWidth(w: WidthKey): void {
     }
 }
 
-const BASE_TABS = ["Core", "Combat", "Skills", "Adjustments", "Feats", "Spells", "Specials", "Inventory"] as const;
-const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Spells", "Specials"] as const;
+const BASE_TABS = [
+    "Core",
+    "Combat",
+    "Skills",
+    "Adjustments",
+    "Feats",
+    "Spells",
+    "Resources",
+    "Specials",
+    "Inventory",
+] as const;
+const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Spells", "Resources", "Specials"] as const;
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Core");
 
@@ -203,11 +223,12 @@ const activeTab = ref<TabName>("Core");
 // A DM who has switched to "fake player" (to preview what players see) gets the player view, i.e.
 // no Diagnostics tab either.
 const isDm = computed(() => viewerIsDm(api));
-// The Spells tab only appears for a character or creature that has spells.
+// The Spells and Resources tabs only appear when there are spells / limited-use resources.
 const hasSpells = computed(() => data.value.spellcasting.some((sc) => sc.spells.length > 0));
+const hasResources = computed(() => (data.value.resources ?? []).length > 0);
 const visibleTabs = computed<readonly TabName[]>(() => {
     const all: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
-    const tabs = hasSpells.value ? all : all.filter((t) => t !== "Spells");
+    const tabs = all.filter((t) => (t !== "Spells" || hasSpells.value) && (t !== "Resources" || hasResources.value));
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
 
@@ -363,6 +384,12 @@ async function onFileSelected(event: Event): Promise<void> {
                 ? character.combat.hp.max
                 : Math.min(prev.combat.hp.current, character.combat.hp.max);
         }
+        // Uses left are play state as well, for the same character.
+        if (prev.importedAt && prev.identity.name === character.identity.name) {
+            character.resources = carryUsesLeft(character.resources ?? [], prev.resources ?? []);
+        }
+        // And the roll macros switched off on the Combat tab.
+        character.macroExcludedRolls = [...(data.value.macroExcludedRolls ?? [])];
         // And the trackers switched off on the Specials tab.
         const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
         character.untrackedResources = (data.value.untrackedResources ?? []).filter((k) => resourceKeys.has(k));
@@ -476,6 +503,17 @@ function toggleMacroAttack(name: string, on: boolean): void {
     const current = (data.value.macroExcludedAttacks ?? []).filter((n) => n !== name);
     data.value.macroExcludedAttacks = on ? current : [...current, name];
     applyMacroChange(name, on);
+}
+
+function isRollMacro(roll: RollMacro): boolean {
+    return !(data.value.macroExcludedRolls ?? []).includes(roll);
+}
+
+/** The Combat tab's initiative / save Macro checkboxes (in the macros unless unticked). */
+function toggleRollMacro(roll: RollMacro, on: boolean): void {
+    const current = (data.value.macroExcludedRolls ?? []).filter((r) => r !== roll);
+    data.value.macroExcludedRolls = on ? current : [...current, roll];
+    applyMacroChange(`Roll ${roll}`, on);
 }
 
 /** Saves a macro choice and re-exports Custom Data so the macro appears or goes right away. */
@@ -691,6 +729,36 @@ function toggleTracked(r: SheetResource, on: boolean): void {
     flashResourceStatus(
         text === "Trackers are already up to date." ? `${r.name}: ${on ? "tracked" : "not tracked"}.` : text,
     );
+}
+
+// --- Resources tab: uses left, kept on the sheet and mirrored to the token's tracker ---------------
+
+/** Sets a resource's uses left (clamped), saves, and updates its tracker on the token if it has one. */
+function setUsesLeft(r: SheetResource, value: number): void {
+    const left = Math.max(0, Math.min(r.max, Math.round(Number.isFinite(value) ? value : usesLeft(r))));
+    r.left = left;
+    save();
+    const id = currentLocalId.value;
+    if (id === undefined) return;
+    try {
+        pushUsesLeft(api, id, r, left);
+    } catch (e) {
+        console.error("[pf1e-sheet] tracker update failed", e);
+        flashResourceStatus("Updating the tracker failed - see the console.");
+    }
+}
+
+function onUsesInput(r: SheetResource, event: Event): void {
+    const input = event.target as HTMLInputElement;
+    setUsesLeft(r, input.valueAsNumber);
+    input.value = String(usesLeft(r)); // show the clamped value
+}
+
+/** After a night's rest: refill everything that comes back daily; charges and plain uses stay. */
+function newDay(): void {
+    const daily = (data.value.resources ?? []).filter(refillsDaily);
+    for (const r of daily) setUsesLeft(r, r.max);
+    flashResourceStatus(daily.length ? `Refilled ${daily.length} daily resource(s).` : "Nothing refills daily.");
 }
 
 const auraStatus = ref("");
@@ -1076,33 +1144,6 @@ function fmt(n: number): string {
                 <span v-if="auraStatus" class="hp-push-status">{{ auraStatus }}</span>
             </div>
 
-            <h4>Trackers (limited uses, charges, spell slots)</h4>
-            <div v-if="(data.resources ?? []).length" class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tracker</th>
-                            <th>Uses</th>
-                            <th>On token</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="res of data.resources ?? []" :key="res.key">
-                            <td>{{ res.name }}</td>
-                            <td>{{ resourceLabel(res) }}</td>
-                            <td>{{ !isTracked(res) ? "off" : res.uuid ? "yes" : "no" }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div v-else class="readonly-note">
-                No limited-use abilities, charged items or spell slots in the Hero Lab export.
-            </div>
-            <div class="hp-push-row">
-                <button type="button" @click="resyncResources">Create / update trackers on the token</button>
-                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
-            </div>
-
             <h4>Custom Data (for PlanarAlly's dice panel)</h4>
             <div class="readonly-note">
                 Every import writes the sheet's numbers and roll macros into this token's Custom Data (source
@@ -1199,6 +1240,17 @@ function fmt(n: number): string {
                 <label
                     >Will
                     <span class="val">{{ view.combat.saves.will.total }}</span>
+                </label>
+            </div>
+            <div class="macro-row">
+                Dice macros:
+                <label v-for="roll of ROLL_MACROS" :key="roll" class="track-toggle">
+                    <input
+                        type="checkbox"
+                        :checked="isRollMacro(roll)"
+                        @change="toggleRollMacro(roll, ($event.target as HTMLInputElement).checked)"
+                    />
+                    {{ roll }}
                 </label>
             </div>
 
@@ -1463,14 +1515,81 @@ function fmt(n: number): string {
             </div>
         </div>
 
+        <div v-else-if="activeTab === 'Resources'" class="pf1e-panel">
+            <div class="readonly-note">
+                Uses left are kept on the sheet for every resource. With <strong>Track</strong> ticked the resource also
+                has a tracker on the token, and the two stay in step both ways. Nothing refills on its own:
+                <strong>New day</strong> refills the daily ones (x/day, rounds/day, spell slots) but not charges.
+                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
+            </div>
+            <div class="hp-push-row">
+                <button type="button" @click="newDay">New day</button>
+                <button type="button" @click="resyncResources">Create / update trackers on the token</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Resource</th>
+                            <th>Uses</th>
+                            <th>Left</th>
+                            <th>Track</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="res of data.resources ?? []" :key="res.key">
+                            <td>{{ res.name }}</td>
+                            <td>{{ resourceLabel(res) }}</td>
+                            <td class="uses-left">
+                                <button
+                                    type="button"
+                                    :disabled="usesLeft(res) <= 0"
+                                    title="Use one"
+                                    @click="setUsesLeft(res, usesLeft(res) - 1)"
+                                >
+                                    −
+                                </button>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    :max="res.max"
+                                    :value="usesLeft(res)"
+                                    @change="onUsesInput(res, $event)"
+                                />
+                                <button
+                                    type="button"
+                                    :disabled="usesLeft(res) >= res.max"
+                                    title="Get one back"
+                                    @click="setUsesLeft(res, usesLeft(res) + 1)"
+                                >
+                                    +
+                                </button>
+                                / {{ res.max }}
+                            </td>
+                            <td>
+                                <label class="track-toggle" title="Keep a tracker on the token">
+                                    <input
+                                        type="checkbox"
+                                        :checked="isTracked(res)"
+                                        @change="toggleTracked(res, ($event.target as HTMLInputElement).checked)"
+                                    />
+                                    {{ !isTracked(res) ? "" : res.uuid ? "on token" : "missing" }}
+                                </label>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <div v-else-if="activeTab === 'Specials'" class="pf1e-panel">
             <div v-if="!(data.specials ?? []).length" class="readonly-note">
                 No specials found - import the character from Hero Lab to fill this in.
             </div>
             <div v-if="(data.resources ?? []).length" class="readonly-note">
                 Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day, rounds or
-                charges). Untick one to remove its tracker; tick it to add it back. Trackers never refill on their own,
-                so reset daily ones yourself after a rest.
+                charges). Untick one to remove its tracker; tick it to add it back. The Resources tab counts uses either
+                way and has a <strong>New day</strong> button.
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
             </div>
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
@@ -1788,6 +1907,24 @@ function fmt(n: number): string {
         margin-right: 0.35rem;
         font-size: 0.75rem;
         white-space: nowrap;
+    }
+
+    .macro-row {
+        margin: 0.25rem 0 0.75rem;
+        font-size: 0.8rem;
+    }
+
+    .uses-left {
+        white-space: nowrap;
+
+        input {
+            width: 3.5rem;
+            text-align: center;
+        }
+
+        button {
+            padding: 0 0.4rem;
+        }
     }
 
     .custom-adjustment-form {

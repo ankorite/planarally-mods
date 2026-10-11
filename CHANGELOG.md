@@ -2,8 +2,16 @@
 
 ## [2026-10-09]
 
-- pf1e-char-sheet v0.22.0-beta.3: the oracle's Life Link becomes a radius aura for its range (e.g.
-  140 ft.); Hero Lab lists it under other abilities, not auras
+- pf1e-char-sheet v0.22.0-beta.3:
+    - Resources tab: every limited-use ability, charged item and spell level's slots with its uses
+      left (− / + or type a number), kept on the sheet whether or not it is tracked on the token; a
+      tracked one stays in step with its tracker both ways. **New day** refills the daily ones
+      (not charges). Re-importing the same character keeps the uses left. The trackers list moved
+      here from the Core tab
+    - the Initiative, Fortitude, Reflex and Will dice macros can each be switched off on the Combat
+      tab
+    - the oracle's Life Link becomes a radius aura for its range (e.g. 140 ft.); Hero Lab lists it
+      under other abilities, not auras
 - pf1e-char-sheet v0.22.0-beta.2: the mythic path and tier are imported (Hero Lab only lists them
   in the class summary, e.g. "Hierophant 1") and shown in the Classes table on the Core tab
 

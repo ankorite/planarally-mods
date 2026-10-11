@@ -178,8 +178,13 @@ export interface SheetResource {
     /** Tracker name, e.g. "Darkness (3/day)" or "Oracle level 1 slots". */
     name: string;
     max: number;
-    /** Uses already spent in Hero Lab at export time (only used when the tracker is first made). */
+    /** Uses already spent in Hero Lab at export time (the starting point when `left` isn't set yet). */
     used: number;
+    /**
+     * Uses left, kept by the sheet whether or not the resource has a tracker on the token; while it
+     * has one, the two are kept in step. Unset until first changed: then it is max - used.
+     */
+    left?: number;
     /** PlanarAlly's uuid for the tracker on the token; "" until it has been created. */
     uuid: string;
 }
@@ -273,6 +278,11 @@ export type PF1Character = {
      */
     untrackedResources?: string[];
     /**
+     * The fixed roll macros switched off on the Combat tab: "Initiative", "Fortitude", "Reflex",
+     * "Will". They are exported unless listed here. Optional for older saves.
+     */
+    macroExcludedRolls?: string[];
+    /**
      * Spells exported as dice macros: `enabled` holds spell keys (see spellKey in spells.ts) and
      * `formulas` any formula edited on the Spells tab. Optional for older saves.
      */
@@ -319,6 +329,7 @@ export function emptyCharacter(): PF1Character {
         adjustments: { enabled: [], custom: [] },
         resources: [],
         untrackedResources: [],
+        macroExcludedRolls: [],
         spellMacros: { enabled: [], formulas: {} },
         notes: "",
         importedAt: undefined,
