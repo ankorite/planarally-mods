@@ -210,8 +210,11 @@ function parseCombat(character: Element, out: PF1Character): void {
     out.combat.cmd = num(attr(maneuvers, "cmd"));
 
     out.combat.initiative = num(attr(own(character, "initiative"), "total"));
-    // Current effective speed (already reduced for armor/load), matching HL's own sheet.
-    out.combat.speed = num(attr(own(own(character, "movement"), "speed"), "value"));
+    // Current effective speed (already reduced for armor/load), matching HL's own sheet, and the
+    // speed before that reduction - HL's "Speed 30/20" is <basespeed>/<speed>.
+    const movement = own(character, "movement");
+    out.combat.speed = num(attr(own(movement, "speed"), "value"));
+    out.combat.baseSpeed = num(attr(own(movement, "basespeed"), "value")) || out.combat.speed;
 
     const toAttack =
         (kind: "melee" | "ranged") =>

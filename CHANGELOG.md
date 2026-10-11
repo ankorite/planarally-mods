@@ -12,6 +12,8 @@
       ticked (sheets imported before keep the trackers they have)
     - the Initiative, Fortitude, Reflex and Will dice macros can each be switched off on the Combat
       tab
+    - the Combat tab shows the speed before armor and load next to the effective one ("20 (base
+      30)"), like Hero Lab's "30/20"
     - the update banner links straight to the GitHub Releases page
     - the oracle's Life Link becomes a radius aura for its range (e.g. 140 ft.); Hero Lab lists it
       under other abilities, not auras

@@ -1200,6 +1200,13 @@ function fmt(n: number): string {
                 <label
                     >Speed
                     <span class="val">{{ view.combat.speed }}</span>
+                    <span
+                        v-if="data.combat.baseSpeed && data.combat.baseSpeed !== data.combat.speed"
+                        class="speed-base"
+                        title="Reduced by armor or load, as in Hero Lab"
+                    >
+                        (base {{ data.combat.baseSpeed }})
+                    </span>
                 </label>
                 <label
                     >AC
@@ -1911,6 +1918,11 @@ function fmt(n: number): string {
         margin-right: 0.35rem;
         font-size: 0.75rem;
         white-space: nowrap;
+    }
+
+    .speed-base {
+        color: #666;
+        font-size: 0.8rem;
     }
 
     .macro-row {

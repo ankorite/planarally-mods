@@ -245,7 +245,10 @@ export type PF1Character = {
         cmb: number;
         cmd: number;
         initiative: number;
+        /** Effective land speed: after armor and load, as Hero Lab shows it. */
         speed: number;
+        /** Speed before armor and load ("30/20" in Hero Lab is base/speed). Optional for older saves. */
+        baseSpeed?: number;
         attacks: AttackEntry[];
     };
     skills: SkillEntry[];
