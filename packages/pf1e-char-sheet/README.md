@@ -354,7 +354,7 @@ The DM-only **Diagnostics** tab has two read-only reports to copy into a bug rep
 
 When the DM opens a sheet, the mod reads the `version` in this package's `mod.toml` on the repository's
 `main` branch (from `raw.githubusercontent.com`) and compares it with the installed version. If GitHub's
-is newer, a banner at the top of the sheet says so, with a link to the repository. **✕** hides it until
+is newer, a banner at the top of the sheet says so, with a link to the GitHub Releases page to download the new `.pam`. **✕** hides it until
 the next new version.
 
 - Only the DM sees it, and only the DM's browser contacts GitHub, once per page load.

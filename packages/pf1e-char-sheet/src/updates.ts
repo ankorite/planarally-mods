@@ -7,6 +7,8 @@
 // browser console as "[pf1e-sheet] update check: ...", so a missing banner can be explained.
 
 export const REPO_URL = "https://github.com/ankorite/planarally-mods";
+/** Where the update banner links: the releases list, newest (pre-)release with its .pam on top. */
+export const RELEASES_URL = `${REPO_URL}/releases`;
 const REMOTE_MOD_TOML =
     "https://raw.githubusercontent.com/ankorite/planarally-mods/main/packages/pf1e-char-sheet/mod.toml";
 

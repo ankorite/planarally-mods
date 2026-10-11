@@ -56,7 +56,7 @@ import {
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
-import { logDismissed, newerVersion, REPO_URL } from "./updates";
+import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -976,7 +976,7 @@ function fmt(n: number): string {
     <div id="pf1e-sheet" :style="widthStyle">
         <div v-if="availableUpdate" class="update-banner">
             PF1e sheet {{ availableUpdate }} is available (you have {{ modVersion }}).
-            <a :href="REPO_URL" target="_blank" rel="noopener noreferrer">Get it on GitHub</a>
+            <a :href="RELEASES_URL" target="_blank" rel="noopener noreferrer">Download it from GitHub Releases</a>
             <button type="button" title="Hide until the next version" @click="dismissUpdate">✕</button>
         </div>
         <div class="pf1e-header">

@@ -10,6 +10,7 @@
       here from the Core tab
     - the Initiative, Fortitude, Reflex and Will dice macros can each be switched off on the Combat
       tab
+    - the update banner links straight to the GitHub Releases page
     - the oracle's Life Link becomes a radius aura for its range (e.g. 140 ft.); Hero Lab lists it
       under other abilities, not auras
 - pf1e-char-sheet v0.22.0-beta.2: the mythic path and tier are imported (Hero Lab only lists them
