@@ -12,6 +12,7 @@ import {
     TARGET_LABELS,
 } from "./adjustments";
 import { syncAuras } from "./auras";
+import { critFxEnabled, naturalOf, playCrit, setCritFxEnabled } from "./crits";
 import {
     attackFormula,
     buildElements,
@@ -971,6 +972,12 @@ async function doRoll(label: string, formula: string): Promise<void> {
         }
         rollStatus.value = `Rolling ${label}...`;
         const out = await rollFormula(api, formula, { label, useNativeUi: showResultCard.value, shape });
+        // With the result card on, the roll goes into PA's history and crits.ts sees it there; without
+        // it, nothing else will, so check for a natural 20 / 1 here.
+        if (!showResultCard.value) {
+            const natural = naturalOf(out.roll);
+            if (natural) playCrit(natural, "", label);
+        }
         return (
             `${label}: ${out.total} (${out.breakdown}) = ${out.formula}` +
             (out.notes.length ? ` - ${out.notes.join("; ")}` : "")
@@ -1321,6 +1328,14 @@ function loadCardDelay(): number {
         /* storage unavailable: the default */
     }
     return CARD_DELAY_DEFAULT_S;
+}
+
+/** Whether this browser plays the natural 20 / 1 animation (Config tab). */
+const critFx = ref(critFxEnabled());
+function setCritFx(on: boolean): void {
+    critFx.value = on;
+    setCritFxEnabled(on);
+    if (on) playCrit("nat20", "Preview", "this is how a natural 20 looks");
 }
 
 /** Seconds before a hover card appears. */
@@ -2445,6 +2460,22 @@ function fmt(n: number): string {
                 <span class="hint"
                     >0 shows it at once. Saved for this browser, for every sheet; clicking a name always shows its
                     card.</span
+                >
+            </div>
+
+            <h4>Natural 20 / natural 1</h4>
+            <div class="config-list">
+                <label>
+                    <input
+                        type="checkbox"
+                        :checked="critFx"
+                        @change="setCritFx(($event.target as HTMLInputElement).checked)"
+                    />
+                    Play an animation when any d20 roll comes up a natural 20 or a natural 1
+                </label>
+                <span class="hint"
+                    >Any d20 roll you see - the dice panel, rolls shared with you, this sheet's rolls. Saved for this
+                    browser.</span
                 >
             </div>
 

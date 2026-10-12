@@ -2,10 +2,13 @@
 
 ## [2026-10-12]
 
-- pf1e-char-sheet v0.22.0-beta.5: a character's specials (class features, racial traits, item
-  abilities) go to the "PF1e (Hero Lab)" compendium too, under Specials (by category or source), and
-  their rule cards can open their compendium page. Existing characters move theirs when their sheet is
-  opened. A monster's or NPC's specials stay on its DM-only sheet
+- pf1e-char-sheet v0.22.0-beta.5:
+    - a character's specials (class features, racial traits, item abilities) go to the "PF1e (Hero
+      Lab)" compendium too, under Specials (by category or source), and their rule cards can open their
+      compendium page. Existing characters move theirs when their sheet is opened. A monster's or NPC's
+      specials stay on its DM-only sheet
+    - a natural 20 or natural 1 on any d20 roll (PlanarAlly's dice panel, shared rolls, the sheet's
+      rolls) plays a short animation over the map; it can be switched off per browser on the Config tab
 - pf1e-char-sheet: merged upstream's "Update mods to dev server"; the sheet now uses
   `@planarally/mod-api` 0.4.0 and its shared Vite setup (`modOptions`), so `pnpm dev` serves it with hot
   reload on port 5278

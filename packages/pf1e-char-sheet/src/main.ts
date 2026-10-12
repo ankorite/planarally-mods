@@ -2,6 +2,7 @@ import type { ApiModMeta, GameApi, LocalId, ModEvents, TrackerId } from "@planar
 
 import { isCharacterShape, isDm } from "./access";
 import CharSheet from "./CharSheet.vue";
+import { disposeCritWatcher, installCritWatcher } from "./crits";
 import { DATA_BLOCK_NAME, emptyCharacter, type PF1Character } from "./data";
 import { diagState, exposeDebugHandle, installBusListeners, note, removeDebugHandle } from "./diagnostics";
 import { disposeRules, initRules } from "./rules";
@@ -34,6 +35,13 @@ function initGame(gameApi: GameApi): void {
     // Rules text in PlanarAlly's compendium, on servers that have it (rules.ts).
     void initRules(api, modTag);
 
+    // A natural 20 or 1 on any d20 roll plays an animation (crits.ts).
+    try {
+        installCritWatcher(api);
+    } catch (e) {
+        console.warn("[pf1e-sheet] natural 20/1 effect couldn't start", e);
+    }
+
     // Tracker -> sheet. PA emits "tracker:updated" on its event bus after every tracker change,
     // whether it came from the local UI or from another player via the server.
     api.eventBus.on("tracker:updated", onTrackerUpdated);
@@ -51,6 +59,7 @@ function initGame(gameApi: GameApi): void {
 function dispose(): void {
     removeDebugHandle();
     disposeRules();
+    disposeCritWatcher();
 }
 
 // Payload shape from PA's own source: { id, trackerId, delta, syncTo }, emitted after the delta has
