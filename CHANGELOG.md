@@ -6,6 +6,9 @@
   abilities) go to the "PF1e (Hero Lab)" compendium too, under Specials (by category or source), and
   their rule cards can open their compendium page. Existing characters move theirs when their sheet is
   opened. A monster's or NPC's specials stay on its DM-only sheet
+- pf1e-char-sheet: merged upstream's "Update mods to dev server"; the sheet now uses
+  `@planarally/mod-api` 0.4.0 and its shared Vite setup (`modOptions`), so `pnpm dev` serves it with hot
+  reload on port 5278
 - pf1e-char-sheet v0.22.0-beta.4:
     - on servers with the compendium (mod API 0.2), feat, spell and skill rules text is stored once
       per campaign (a room data block) and registered as the "PF1e (Hero Lab)" compendium book instead

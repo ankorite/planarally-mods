@@ -61,7 +61,7 @@ For most UI components for example, you'll have to close the component and re-op
 
 This is where the serve / dev / hmr mode comes into play, using a vite dev server which can be started using the `pnpm dev` command.
 
-Each package listens on a fixed port (5273–5277) and writes `vite-dev.json` next to its `mod.toml` while that server is running. PlanarAlly loads `origin + entry` from that file, and Vue updates an open mod in place. Stop `pnpm dev` and the file is removed.
+Each package listens on a fixed port (5273–5277; the PF1e sheet uses 5278) and writes `vite-dev.json` next to its `mod.toml` while that server is running. PlanarAlly loads `origin + entry` from that file, and Vue updates an open mod in place. Stop `pnpm dev` and the file is removed.
 
 Restart the PlanarAlly server after changing `dev_directories`. File changes after that are picked up on their own. The DM mod settings also have a "Reload dev mods" button.
 
