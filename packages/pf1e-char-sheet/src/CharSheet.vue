@@ -59,7 +59,8 @@ import {
     usesLeft,
 } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
-import { guessSpellFormula, spellFormula, spellKey } from "./spells";
+import { moveRulesToCompendium, openRule, rulesReady, ruleText, type RuleKind } from "./rules";
+import { spellFormula, spellGuess, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
 import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
 
@@ -459,6 +460,15 @@ async function onFileSelected(event: Event): Promise<void> {
             }
         }
 
+        // The full rules text of feats, spells and skills goes to the campaign's compendium (once,
+        // shared by every token) when the server has one; the sheet keeps the excerpts.
+        try {
+            const added = moveRulesToCompendium(api, character);
+            if (added) notes.push(`Compendium: added ${added} rule${added === 1 ? "" : "s"} to "PF1e (Hero Lab)".`);
+        } catch (e) {
+            console.error("[pf1e-sheet] storing rules text in the compendium failed", e);
+        }
+
         write(character);
         save();
 
@@ -667,7 +677,7 @@ function setSpellFormula(sc: SpellcastingClass, spell: SpellEntry, value: string
     const state = spellMacroState();
     const key = spellKey(sc, spell);
     const trimmed = value.trim();
-    const guess = guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+    const guess = spellGuess(sc, spell);
     if (trimmed === "" || trimmed === guess) delete state.formulas[key];
     else state.formulas[key] = trimmed;
     saveAndReexport(`${spell.name}: formula ${trimmed || guess || "cleared"}.`);
@@ -1171,7 +1181,7 @@ function skillTooltip(row: (typeof skillRows.value)[number]): string {
         `${s.name} (${s.ability.toUpperCase()}) ${fmt(s.total)} = ${parts.join(", ")}`,
         flags.join(" "),
         s.situational ? `Situational: ${s.situational}` : "",
-        s.description ? `\n${s.description}` : "",
+        `\n${s.description || ruleText("skill", s.name)}`.trimEnd(),
     ]
         .filter(Boolean)
         .join("\n");
@@ -1180,7 +1190,7 @@ function skillTooltip(row: (typeof skillRows.value)[number]): string {
 /** A feat's hover text: name and categories, then the full rules text. */
 function featTooltip(feat: FeatEntry): string {
     const head = feat.category ? `${feat.name} [${feat.category}]` : feat.name;
-    const body = feat.fullText || feat.description;
+    const body = feat.fullText || ruleText("feat", feat.name) || feat.description;
     return body ? `${head}\n\n${body}` : head;
 }
 
@@ -1193,6 +1203,16 @@ function specialTooltip(sp: SpecialEntry): string {
     const head = [sp.name, meta.join(" · ")].filter(Boolean).join("\n");
     const body = sp.fullText || sp.description;
     return body ? `${head}\n\n${body}` : head;
+}
+
+/** A spell's full rules text: on the sheet (older imports or no compendium), else from the compendium. */
+function spellText(spell: SpellEntry): string {
+    return spell.fullText || ruleText("spell", spell.name);
+}
+
+/** Clicking a feat, spell or skill name opens PlanarAlly's rule popover, when the rule is in its compendium. */
+function showRule(kind: RuleKind, name: string, event: MouseEvent): void {
+    if (rulesReady.value) openRule(api, kind, name, event);
 }
 
 const shownSkillRows = computed(() => {
@@ -1698,7 +1718,12 @@ function fmt(n: number): string {
                                     <td class="flags">
                                         <span v-if="row.skill.classSkill" title="Class skill">✓</span>
                                     </td>
-                                    <td class="skill-name" :title="skillTooltip(row)">
+                                    <td
+                                        class="skill-name"
+                                        :class="{ 'rule-link': rulesReady }"
+                                        :title="skillTooltip(row)"
+                                        @click="showRule('skill', row.skill.name, $event)"
+                                    >
                                         {{ row.skill.name }}
                                         <span v-if="row.skill.situational" class="flag" title="Situational modifier"
                                             >*</span
@@ -1903,9 +1928,13 @@ function fmt(n: number): string {
         <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
             <ul class="feat-list">
                 <li v-for="(feat, i) of data.feats" :key="i" class="hover-info" :title="featTooltip(feat)">
-                    <strong>{{ feat.name }}</strong>
+                    <strong :class="{ 'rule-link': rulesReady }" @click="showRule('feat', feat.name, $event)">{{
+                        feat.name
+                    }}</strong>
                     <span v-if="feat.category" class="special-source">{{ feat.category }}</span>
-                    <span v-if="feat.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
+                    <span v-if="feat.fullText || ruleText('feat', feat.name)" class="info-icon" aria-hidden="true"
+                        >ⓘ</span
+                    >
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
@@ -1934,11 +1963,16 @@ function fmt(n: number): string {
                     <ul class="spell-rows">
                         <li v-for="spell of group.spells" :key="spell.name" class="spell-row">
                             <div class="spell-main">
-                                <strong>{{ spell.name }}</strong>
+                                <strong
+                                    :class="{ 'rule-link': rulesReady }"
+                                    :title="spellText(spell) || undefined"
+                                    @click="showRule('spell', spell.name, $event)"
+                                    >{{ spell.name }}</strong
+                                >
                                 <span
-                                    v-if="spell.fullText"
+                                    v-if="spellText(spell)"
                                     class="info-icon"
-                                    :title="spell.fullText"
+                                    :title="spellText(spell)"
                                     aria-label="Full text"
                                     >ⓘ</span
                                 >
@@ -2938,6 +2972,13 @@ function fmt(n: number): string {
     // (see the earlier feats-as-columns bug), and the browser's own tooltip is immune to that.
     .hover-info {
         cursor: help;
+    }
+
+    // A name that opens PlanarAlly's rule popover (the rule is in the compendium).
+    .rule-link {
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-underline-offset: 2px;
     }
 
     .info-icon {

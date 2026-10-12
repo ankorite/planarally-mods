@@ -95,6 +95,7 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
+- `src/rules.ts` — feat, spell and skill rules text in a campaign room block and PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
@@ -167,6 +168,23 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 
 A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
 the sheet. Hiding a section or tab only hides it.
+
+## Compendium
+
+On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells
+and skills is stored **once per campaign** instead of on every token's sheet:
+
+- On import, any feat, spell or skill text the campaign doesn't have yet is saved in a shared room data
+  block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats, Spells by
+  school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
+  the short excerpts, which cuts a typical character's sheet data by about two thirds.
+- Hover text on the sheet reads from the compendium, and clicking a feat, spell or skill name (dotted
+  underline) opens PlanarAlly's rule popover.
+- Every client registers the book when the game loads, and again when anyone's import adds rules.
+- Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
+- A server without the compendium keeps the text on each sheet, as before. Characters imported before
+  this keep their text until they are re-imported.
+- The Diagnostics health check reports the compendium's size and this sheet's size.
 
 ## Monsters and NPCs
 

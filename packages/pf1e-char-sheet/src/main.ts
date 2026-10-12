@@ -4,6 +4,7 @@ import { isCharacterShape, isDm } from "./access";
 import CharSheet from "./CharSheet.vue";
 import { DATA_BLOCK_NAME, emptyCharacter, type PF1Character } from "./data";
 import { diagState, exposeDebugHandle, installBusListeners, note, removeDebugHandle } from "./diagnostics";
+import { disposeRules, initRules } from "./rules";
 import { isHpTrackerName } from "./trackers";
 
 // Shared game API handle, set in initGame and used throughout the mod.
@@ -16,7 +17,10 @@ function init(meta: ApiModMeta): void {
     console.log(`Loading ${meta.name} v${meta.version}`);
     diagState.meta = meta;
     modVersion = meta.version;
+    modTag = meta.tag;
 }
+
+let modTag: string | undefined;
 
 function initGame(gameApi: GameApi): void {
     api = gameApi;
@@ -26,6 +30,9 @@ function initGame(gameApi: GameApi): void {
     api.ui.shape.registerTab({ component: CharSheet, id: "PF1E", label: "PF1e Sheet" }, (shape, hasEditAccess) =>
         isCharacterShape(api, shape) ? hasEditAccess : isDm(api),
     );
+
+    // Rules text in PlanarAlly's compendium, on servers that have it (rules.ts).
+    void initRules(api, modTag);
 
     // Tracker -> sheet. PA emits "tracker:updated" on its event bus after every tracker change,
     // whether it came from the local UI or from another player via the server.
@@ -43,6 +50,7 @@ function initGame(gameApi: GameApi): void {
 // PlanarAlly removes the tab, event-bus listeners and hooks itself after this returns.
 function dispose(): void {
     removeDebugHandle();
+    disposeRules();
 }
 
 // Payload shape from PA's own source: { id, trackerId, delta, syncTo }, emitted after the delta has

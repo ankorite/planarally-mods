@@ -72,10 +72,15 @@ export function guessSpellFormula(text: string, cl: number): string {
     return `${count}d${die}${bonus === 0 ? "" : bonus > 0 ? `+${bonus}` : `${bonus}`}`;
 }
 
+/** The formula guessed for a spell: made at import, or from the text the sheet has (older imports). */
+export function spellGuess(sc: SpellcastingClass, spell: SpellEntry): string {
+    return spell.guess ?? guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+}
+
 /** The spell's macro formula: the one edited on the sheet, else the guess. */
 export function spellFormula(c: PF1Character, sc: SpellcastingClass, spell: SpellEntry): string {
     const edited = c.spellMacros?.formulas[spellKey(sc, spell)];
-    return edited ?? guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+    return edited ?? spellGuess(sc, spell);
 }
 
 /** The spells exported as dice macros, with their formulas, in sheet order. */

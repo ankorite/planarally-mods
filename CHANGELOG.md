@@ -13,6 +13,10 @@
     - hovering a skill shows its Hero Lab rules text with the total's breakdown and any situational
       modifier (marked *), like Hero Lab Classic; re-import to fill it in. Feats (with their
       category) and specials (with type, source and uses) show their rules text on hover the same way
+    - on servers with the compendium (mod API 0.2), feat, spell and skill rules text is stored once
+      per campaign (a room data block) and registered as the "PF1e (Hero Lab)" compendium book instead
+      of on every sheet (about two thirds smaller); clicking those names opens PlanarAlly's rule popover.
+      Specials stay on the sheet. Uses `@planarally/mod-api` 0.2.0; older servers keep the text on the sheet
     - **Config** tab: hide Sheet sections, individual weapons and skills (or every skill without
       ranks) and whole tabs, per character and kept across re-imports; hidden weapons and skills also
       leave the dice macros
