@@ -164,6 +164,8 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 - **Sheet sections**: switch off any block of the Sheet tab (e.g. Combat maneuvers, Money and experience).
 - **Weapons**: hide individual weapons, e.g. a bite or unarmed strike you never use.
 - **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
+- **Rule cards**: how many seconds to hover before a rule card appears (default 3; saved for this
+  browser, for every sheet).
 - **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
 
 A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
@@ -171,7 +173,8 @@ the sheet. Hiding a section or tab only hides it.
 
 ## Rule cards
 
-Resting the mouse on a skill, feat, spell or special for 3 seconds shows a rule card: the name in a black bar, a details line
+Resting the mouse on a skill, feat, spell or special for 3 seconds (set on the Config tab, per
+browser; 0 shows it at once) shows a rule card: the name in a black bar, a details line
 (a skill's breakdown and flags, a feat's category, a spell's level, school, casting time, range,
 duration and DC, a special's type, source and uses) and the rules text in paragraphs with
 **Benefit:** / **Check:**-style labels in bold. Moving onto the card keeps it open; clicking a name

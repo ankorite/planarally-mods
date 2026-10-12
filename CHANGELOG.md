@@ -8,7 +8,8 @@
       of on every sheet (about two thirds smaller); the sheet reads the text from the compendium. Older
       sheets move their text there when first opened. Specials stay on the sheet. Uses
       `@planarally/mod-api` 0.2.0; older servers keep the text on the sheet
-    - skills, feats, spells and specials show a styled rule card after a 3 second hover instead of a plain tooltip;
+    - skills, feats, spells and specials show a styled rule card after a hover (3 seconds by default, set
+      on the Config tab) instead of a plain tooltip;
       click to pin it, and a pinned card can open the rule's compendium page
 
 ## [2026-10-09]

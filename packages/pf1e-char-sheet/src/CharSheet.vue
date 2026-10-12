@@ -1264,8 +1264,39 @@ const card = ref<(RuleCard & { x: number; y: number; pinned: boolean; note?: str
 let cardHideTimer: ReturnType<typeof setTimeout> | undefined;
 let cardShowTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** How long the mouse has to rest on a name before its card appears on hover (a click shows it at once). */
-const CARD_HOVER_DELAY_MS = 3000;
+// How long the mouse has to rest on a name before its card appears on hover (a click shows it at once).
+// Set on the Config tab; it is a preference of whoever is looking, so it is kept per browser like the
+// sheet width, not with the character.
+const CARD_DELAY_KEY = "pf1e-sheet-card-delay";
+const CARD_DELAY_DEFAULT_S = 3;
+const CARD_DELAY_MAX_S = 10;
+
+function loadCardDelay(): number {
+    try {
+        const saved = Number(localStorage.getItem(CARD_DELAY_KEY));
+        if (localStorage.getItem(CARD_DELAY_KEY) !== null && Number.isFinite(saved)) {
+            return Math.min(CARD_DELAY_MAX_S, Math.max(0, saved));
+        }
+    } catch {
+        /* storage unavailable: the default */
+    }
+    return CARD_DELAY_DEFAULT_S;
+}
+
+/** Seconds before a hover card appears. */
+const cardDelay = ref(loadCardDelay());
+
+function setCardDelay(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const value = input.valueAsNumber;
+    cardDelay.value = Number.isFinite(value) ? Math.min(CARD_DELAY_MAX_S, Math.max(0, value)) : CARD_DELAY_DEFAULT_S;
+    input.value = String(cardDelay.value);
+    try {
+        localStorage.setItem(CARD_DELAY_KEY, String(cardDelay.value));
+    } catch {
+        /* not remembered; applies for now anyway */
+    }
+}
 
 function showCard(c: RuleCard, event: MouseEvent): void {
     if (card.value?.pinned) return;
@@ -1279,7 +1310,7 @@ function showCard(c: RuleCard, event: MouseEvent): void {
     }
     cardShowTimer = setTimeout(() => {
         if (!card.value?.pinned) card.value = { ...c, x, y, pinned: false };
-    }, CARD_HOVER_DELAY_MS);
+    }, cardDelay.value * 1000);
 }
 
 function hideCard(): void {
@@ -2341,6 +2372,27 @@ function fmt(n: number): string {
                 </label>
             </div>
 
+            <h4>Rule cards</h4>
+            <div class="config-list">
+                <label>
+                    Show a rule card after hovering a skill, feat, spell or special for
+                    <input
+                        class="delay-input"
+                        type="number"
+                        min="0"
+                        :max="CARD_DELAY_MAX_S"
+                        step="0.5"
+                        :value="cardDelay"
+                        @change="setCardDelay"
+                    />
+                    seconds
+                </label>
+                <span class="hint"
+                    >0 shows it at once. Saved for this browser, for every sheet; clicking a name always shows its
+                    card.</span
+                >
+            </div>
+
             <h4>Tabs</h4>
             <div class="config-list">
                 <label v-for="tab of configTabs" :key="tab">
@@ -2995,6 +3047,11 @@ function fmt(n: number): string {
         .hint {
             color: #666;
             font-size: 0.75rem;
+        }
+
+        .delay-input {
+            width: 4rem;
+            margin: 0 0.25rem;
         }
     }
 
