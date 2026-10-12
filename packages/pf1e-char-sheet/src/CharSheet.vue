@@ -1260,7 +1260,7 @@ function spellText(spell: SpellEntry): string {
     return spell.fullText || ruleText("spell", spell.name);
 }
 
-const card = ref<(RuleCard & { x: number; y: number; pinned: boolean }) | null>(null);
+const card = ref<(RuleCard & { x: number; y: number; pinned: boolean; note?: string }) | null>(null);
 let cardHideTimer: ReturnType<typeof setTimeout> | undefined;
 
 function showCard(c: RuleCard, event: MouseEvent): void {
@@ -1312,8 +1312,9 @@ const cardInCompendium = computed(() => {
 async function openCardInCompendium(event: MouseEvent): Promise<void> {
     const r = card.value?.rule;
     if (!r) return;
-    card.value = null;
-    await openRule(api, r.kind, r.name, event);
+    const result = await openRule(api, r.kind, r.name, event);
+    if (result.ok) card.value = null;
+    else if (card.value) card.value.note = `Couldn't open it: ${result.reason}.`;
 }
 
 /** The card's paragraphs: split on blank lines (and before "Benefit:"-style lines), labels pulled out. */
@@ -2384,7 +2385,17 @@ function fmt(n: number): string {
                     <p v-if="!card.body" class="rc-empty">No rules text in this import.</p>
                 </div>
                 <div class="rc-foot">
-                    <button v-if="card.pinned && cardInCompendium" type="button" @click="openCardInCompendium">
+                    <span v-if="card.note" class="rc-note">{{ card.note }}</span>
+                    <button
+                        v-if="card.pinned && card.rule && rulesReady"
+                        type="button"
+                        :title="
+                            cardInCompendium
+                                ? 'Open this rule\'s page in the compendium'
+                                : 'Not found in the compendium yet'
+                        "
+                        @click="openCardInCompendium"
+                    >
                         Open in compendium
                     </button>
                     <span v-if="!card.pinned">Click to pin</span>
@@ -3275,6 +3286,11 @@ function fmt(n: number): string {
 
         &:empty {
             display: none;
+        }
+
+        .rc-note {
+            flex: 1 1 auto;
+            color: #a00;
         }
     }
 

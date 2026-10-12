@@ -38,6 +38,7 @@ let gameApi: GameApi | undefined;
 /** PlanarAlly's compendium system (runtime only; the mod API types just `register`). */
 interface CompendiumSystem {
     getEntry?: (ref: string) => { body?: string } | undefined;
+    listEntries?: () => { id: string; mod: string; book: string; ref: string; body?: string }[];
     openRuleAt?: (ref: string, x: number, y: number) => void;
     toggle?: () => void;
 }
@@ -125,17 +126,30 @@ export function rulesStatus(api: GameApi): string {
 }
 
 /**
+ * PlanarAlly's reference to a registered rule: "<mod tag>/<id>", or - should PlanarAlly prefix it
+ * differently - whatever reference its entry list gives the entry with this id in this mod's book.
+ */
+function registeredRef(kind: RuleKind, name: string): string | undefined {
+    const compendium = compendiumSystem(gameApi);
+    const direct = ruleRef(kind, name);
+    if (compendium?.getEntry?.(direct)) return direct;
+    const id = ruleId(kind, name);
+    return compendium?.listEntries?.().find((e) => e.id === id && (e.mod === modTag || e.book === BOOK))?.ref;
+}
+
+/**
  * The full rules text of a feat, spell or skill, read from PlanarAlly's compendium (the entry this mod
  * registered); falls back to the campaign's rules block that feeds it, which is the same text.
  */
 export function ruleText(kind: RuleKind, name: string): string {
-    const fromCompendium = compendiumSystem(gameApi)?.getEntry?.(ruleRef(kind, name))?.body;
+    const ref = registeredRef(kind, name);
+    const fromCompendium = ref ? compendiumSystem(gameApi)?.getEntry?.(ref)?.body : undefined;
     return fromCompendium ?? block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
 }
 
 /** Whether a rule is registered in PlanarAlly's compendium (so its page can be opened). */
 export function ruleRegistered(kind: RuleKind, name: string): boolean {
-    return compendiumSystem(gameApi)?.getEntry?.(ruleRef(kind, name)) !== undefined;
+    return registeredRef(kind, name) !== undefined;
 }
 
 /** PlanarAlly's reference to a rule, for its rule popover and for chat links: "pf1e-sheet/feat-power-attack". */
@@ -149,19 +163,28 @@ export function ruleRef(kind: RuleKind, name: string): string {
  * The panel keeps its selected entry to itself and the mod API can't navigate it, so this opens the
  * panel, types the rule's name into its search box and picks the "PF1e (Hero Lab)" result - what you
  * would do by hand - then brings the panel to the front. If that doesn't work (a PlanarAlly version
- * with a different panel), it shows PlanarAlly's rule popover at the mouse instead. Returns false when
- * the rule isn't in the compendium at all.
+ * with a different panel), it shows PlanarAlly's rule popover at the mouse instead. Returns ok: false when
+ * the rule isn't in the compendium, with the reason (also logged to the console).
  */
-export async function openRule(api: GameApi, kind: RuleKind, name: string, event: MouseEvent): Promise<boolean> {
+export async function openRule(
+    api: GameApi,
+    kind: RuleKind,
+    name: string,
+    event: MouseEvent,
+): Promise<{ ok: boolean; reason: string }> {
     const compendium = compendiumSystem(api);
-    const ref = ruleRef(kind, name);
     if (!compendium?.getEntry) {
-        console.info("[pf1e-sheet] compendium: this PlanarAlly has no compendium system to open");
-        return false;
+        const reason = "this PlanarAlly has no compendium system to open";
+        console.info(`[pf1e-sheet] compendium: ${reason}`);
+        return { ok: false, reason };
     }
-    if (!compendium.getEntry(ref)) {
-        console.info(`[pf1e-sheet] compendium: ${ref} isn't registered - re-import the character to add it`);
-        return false;
+    const ref = registeredRef(kind, name);
+    if (!ref) {
+        const all = compendium.listEntries?.() ?? [];
+        const ours = all.filter((e) => e.book === BOOK);
+        const reason = `"${name}" isn't in the compendium (looked for ${ruleRef(kind, name)}; the ${BOOK} book has ${ours.length} entries${ours[0] ? `, e.g. ${ours[0].ref}` : ""})`;
+        console.info(`[pf1e-sheet] compendium: ${reason}`);
+        return { ok: false, reason };
     }
     const { clientX, clientY } = event;
 
@@ -182,7 +205,7 @@ export async function openRule(api: GameApi, kind: RuleKind, name: string, event
             if (hit) {
                 hit.click();
                 panel.click(); // the panel's own click handler brings it in front of other dialogs
-                return true;
+                return { ok: true, reason: "" };
             }
             console.info(`[pf1e-sheet] compendium: no search result for "${name}"; showing the popover instead`);
         } else {
@@ -192,7 +215,7 @@ export async function openRule(api: GameApi, kind: RuleKind, name: string, event
         console.warn("[pf1e-sheet] couldn't open the compendium page", e);
     }
     compendium.openRuleAt?.(ref, clientX, clientY);
-    return true;
+    return { ok: true, reason: "" };
 }
 
 /**
