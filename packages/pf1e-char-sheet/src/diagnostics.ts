@@ -625,7 +625,7 @@ export async function buildHealthCheck(
         ok(
             `trackers on token: ${real.map((t) => `${String(get(t, "name"))} ${String(get(t, "value"))}/${String(get(t, "maxvalue"))}`).join(", ") || "(none)"}`,
         );
-        if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Core tab');
+        if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Token tab');
         else if (hp.length > 1) bad(`${hp.length} trackers named "HP" - only the first is synced`);
         const first = hp[0];
         if (first !== undefined && get(first, "value") !== current) {

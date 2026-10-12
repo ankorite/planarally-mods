@@ -103,6 +103,31 @@ export interface SaveBlock {
     // The "base" save from class tables, before ability/misc modifiers.
     base: number;
     total: number;
+    /** Hero Lab's breakdown: total = base + ability + resist + misc. Optional for older saves. */
+    ability?: number;
+    /** Resistance bonus (cloak of resistance and the like). */
+    resist?: number;
+    misc?: number;
+}
+
+/** Hero Lab's AC breakdown: AC = 10 + all of these. */
+export interface AcParts {
+    armor: number;
+    shield: number;
+    dex: number;
+    size: number;
+    natural: number;
+    deflect: number;
+    dodge: number;
+    /** Hero Lab's misc plus any Wis/Cha bonus to AC (monk, oracle curses...). */
+    misc: number;
+}
+
+/** One line of Hero Lab's combat maneuver list. */
+export interface ManeuverEntry {
+    name: string;
+    cmb: number;
+    cmd: number;
 }
 
 export interface AttackEntry {
@@ -115,6 +140,8 @@ export interface AttackEntry {
     critical: string;
     /** e.g. "S", "P", "B", "S/P" */
     damageType: string;
+    /** Range increment of a ranged weapon, e.g. "30 ft."; empty or absent for melee. */
+    range?: string;
     notes: string;
     /**
      * From Hero Lab's <melee> or <ranged> list: decides whether Str or Dex adjustments apply. Optional
@@ -131,6 +158,10 @@ export interface SkillEntry {
     miscMod: number;
     total: number;
     trainedOnly: boolean;
+    /** Hero Lab's ability bonus for the skill. Optional for older saves. */
+    abilityMod?: number;
+    /** The armor check penalty applies. */
+    armorCheck?: boolean;
 }
 
 export interface FeatEntry {
@@ -232,19 +263,38 @@ export type PF1Character = {
         deity: string;
         size: string;
         gender: string;
+        /** Optional: characters imported before the paper-style sheet lack these. */
+        age?: string;
+        hitDice?: string;
+        languages?: string[];
     };
     classes: ClassLevel[];
     /** Mythic path and tier (Mythic Adventures); absent for a non-mythic character. */
     mythic?: MythicTier;
     abilities: AbilityScores;
+    /** Scores before enhancement and other bonuses (Hero Lab's "16/18" is base/modified). Optional. */
+    abilityBase?: AbilityScores;
     combat: {
         hp: { max: number; current: number; nonlethal: number };
         ac: { normal: number; touch: number; flatFooted: number };
+        /** The paper sheet's breakdowns; all optional because older imports lack them. */
+        acParts?: AcParts;
         saves: { fort: SaveBlock; ref: SaveBlock; will: SaveBlock };
+        /** Situational save modifiers, e.g. "+2 vs. enchantments". */
+        saveNotes?: string;
         bab: number;
+        /** Hero Lab's attack lines, e.g. "+10/+5". */
+        meleeAttack?: string;
+        rangedAttack?: string;
         cmb: number;
         cmd: number;
+        cmdFlatFooted?: number;
+        maneuvers?: ManeuverEntry[];
         initiative: number;
+        /** Initiative = ability + misc. */
+        initiativeParts?: { ability: number; misc: number };
+        armorCheckPenalty?: number;
+        maxDex?: number;
         /** Effective land speed: after armor and load, as Hero Lab shows it. */
         speed: number;
         /** Speed before armor and load ("30/20" in Hero Lab is base/speed). Optional for older saves. */
@@ -255,7 +305,9 @@ export type PF1Character = {
     feats: FeatEntry[];
     spellcasting: SpellcastingClass[];
     inventory: InventoryItem[];
-    currency: { gp: number };
+    currency: { gp: number; pp?: number; sp?: number; cp?: number };
+    /** Experience points. Optional for older saves. */
+    xp?: number;
     /**
      * Auras inferred from the Hero Lab specials (Darkvision, "Aura of Courage (10 ft.)" ...).
      * Optional because characters saved before this existed don't have it.
@@ -264,12 +316,12 @@ export type PF1Character = {
     /** Hero Lab's Specials tab. Optional because characters saved before this existed lack it. */
     specials?: SpecialEntry[];
     /**
-     * Names of the skills exported as dice macros (chosen on the Skills tab; kept across re-imports).
+     * Names of the skills exported as dice macros (chosen on the Sheet tab; kept across re-imports).
      * Optional because characters saved before this existed don't have it.
      */
     macroSkills?: string[];
     /**
-     * Names of the attacks left out of the dice macros (unticked on the Combat tab). Attacks are in by
+     * Names of the attacks left out of the dice macros (unticked on the Sheet tab). Attacks are in by
      * default, so this lists exclusions; kept across re-imports. Optional for older saves.
      */
     macroExcludedAttacks?: string[];
@@ -287,7 +339,7 @@ export type PF1Character = {
      */
     untrackedResources?: string[];
     /**
-     * The fixed roll macros switched off on the Combat tab: "Initiative", "Fortitude", "Reflex",
+     * The fixed roll macros switched off on the Sheet tab: "Initiative", "Fortitude", "Reflex",
      * "Will". They are exported unless listed here. Optional for older saves.
      */
     macroExcludedRolls?: string[];

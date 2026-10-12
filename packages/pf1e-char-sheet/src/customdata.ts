@@ -124,7 +124,7 @@ export function damageFormula(text: string): string | undefined {
  * character's enabled adjustments are applied first, so the numbers, macros and roll buttons all
  * include them. Pass the stored character, not an already-adjusted copy.
  */
-/** The fixed roll macros, which the Combat tab can switch off one by one. */
+/** The fixed roll macros, which the Sheet tab can switch off one by one. */
 export const ROLL_MACROS = ["Initiative", "Fortitude", "Reflex", "Will"] as const;
 export type RollMacro = (typeof ROLL_MACROS)[number];
 
@@ -193,8 +193,8 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
         attacks.push(entry);
     }
 
-    // --- roll macros: initiative and saves (unless switched off on the Combat tab), attacks and the
-    // skills picked on the Skills tab ---
+    // --- roll macros: initiative and saves (unless switched off on the Sheet tab), attacks and the
+    // skills picked there ---
     const excludedRolls = new Set(c.macroExcludedRolls ?? []);
     const fixed: [RollMacro, string][] = [
         ["Initiative", init],
@@ -205,7 +205,7 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
     for (const [roll, field] of fixed) {
         if (!excludedRolls.has(roll)) add(MACRO_PREFIX, `Roll ${roll}`, "dice-expression", checkFormula(field));
     }
-    // Per weapon: one macro per iterative attack, then its damage - unless unticked on the Combat tab.
+    // Per weapon: one macro per iterative attack, then its damage - unless unticked on the Sheet tab.
     const excludedAttacks = new Set(c.macroExcludedAttacks ?? []);
     c.combat.attacks.forEach((atk, i) => {
         const entry = attacks[i];

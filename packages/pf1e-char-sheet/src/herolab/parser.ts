@@ -28,11 +28,13 @@ import {
     abilityModifier,
     emptyCharacter,
     type AbilityKey,
+    type AbilityScores,
     type AttackEntry,
     type FeatEntry,
     type InventoryItem,
     type MythicTier,
     type PF1Character,
+    type SaveBlock,
     type SheetAura,
     type SheetResource,
     type SkillEntry,
@@ -139,8 +141,20 @@ function parseIdentity(character: Element, out: PF1Character): void {
     out.identity.deity = attr(own(character, "deity"), "name");
     out.identity.size = attr(own(character, "size"), "name") || "Medium";
     out.identity.gender = attr(own(character, "personal"), "gender");
+    out.identity.age = attr(own(character, "personal"), "age");
+    out.identity.hitDice = attr(own(character, "health"), "hitdice");
+    out.identity.languages = ownAll(own(character, "languages"), "language")
+        .map((l) => attr(l, "name"))
+        .filter(Boolean);
 
-    out.currency.gp = num(attr(own(character, "money"), "gp"));
+    const money = own(character, "money");
+    out.currency = {
+        gp: num(attr(money, "gp")),
+        pp: num(attr(money, "pp")),
+        sp: num(attr(money, "sp")),
+        cp: num(attr(money, "cp")),
+    };
+    out.xp = num(attr(own(character, "xp"), "total"));
 }
 
 const MYTHIC_PATHS = ["archmage", "champion", "guardian", "hierophant", "marshal", "trickster"];
@@ -173,6 +187,7 @@ function parseMythic(summary: string, classes: { name: string }[]): MythicTier |
 }
 
 function parseAbilities(character: Element, out: PF1Character): void {
+    const base: AbilityScores = { ...out.abilities };
     for (const attribute of ownAll(own(character, "attributes"), "attribute")) {
         const key = ABILITY_NAME_TO_KEY[attr(attribute, "name")];
         if (!key) continue;
@@ -180,7 +195,9 @@ function parseAbilities(character: Element, out: PF1Character): void {
         // `modified` reflects the effective score including enhancement/inherent bonuses etc,
         // which is what HL shows on its own sheet as the character's current score.
         out.abilities[key] = num(attr(value, "modified")) || num(attr(value, "base"));
+        base[key] = num(attr(value, "base")) || out.abilities[key];
     }
+    out.abilityBase = base;
 }
 
 function parseCombat(character: Element, out: PF1Character): void {
@@ -193,23 +210,60 @@ function parseCombat(character: Element, out: PF1Character): void {
     out.combat.ac.normal = num(attr(ac, "ac"));
     out.combat.ac.touch = num(attr(ac, "touch"));
     out.combat.ac.flatFooted = num(attr(ac, "flatfooted"));
+    out.combat.acParts = {
+        armor: num(attr(ac, "fromarmor")),
+        shield: num(attr(ac, "fromshield")),
+        dex: num(attr(ac, "fromdexterity")),
+        size: num(attr(ac, "fromsize")),
+        natural: num(attr(ac, "fromnatural")),
+        deflect: num(attr(ac, "fromdeflect")),
+        dodge: num(attr(ac, "fromdodge")),
+        misc: num(attr(ac, "frommisc")) + num(attr(ac, "fromwisdom")) + num(attr(ac, "fromcharisma")),
+    };
 
-    for (const save of ownAll(own(character, "saves"), "save")) {
-        const total = num(attr(save, "save"));
-        const base = num(attr(save, "base"));
+    const saves = own(character, "saves");
+    for (const save of ownAll(saves, "save")) {
+        const block: SaveBlock = {
+            base: num(attr(save, "base")),
+            total: num(attr(save, "save")),
+            ability: num(attr(save, "fromattr")),
+            resist: num(attr(save, "fromresist")),
+            misc: num(attr(save, "frommisc")),
+        };
         const abbr = attr(save, "abbr").toLowerCase();
-        if (abbr === "fort") out.combat.saves.fort = { base, total };
-        else if (abbr === "ref") out.combat.saves.ref = { base, total };
-        else if (abbr === "will") out.combat.saves.will = { base, total };
+        if (abbr === "fort") out.combat.saves.fort = block;
+        else if (abbr === "ref") out.combat.saves.ref = block;
+        else if (abbr === "will") out.combat.saves.will = block;
     }
+    out.combat.saveNotes = attr(own(own(saves, "allsaves"), "situationalmodifiers"), "text");
 
-    out.combat.bab = num(attr(own(character, "attack"), "baseattack"));
+    const attack = own(character, "attack");
+    out.combat.bab = num(attr(attack, "baseattack"));
+    out.combat.meleeAttack = attr(attack, "meleeattack");
+    out.combat.rangedAttack = attr(attack, "rangedattack");
 
     const maneuvers = own(character, "maneuvers");
     out.combat.cmb = num(attr(maneuvers, "cmb"));
     out.combat.cmd = num(attr(maneuvers, "cmd"));
+    out.combat.cmdFlatFooted = num(attr(maneuvers, "cmdflatfooted")) || out.combat.cmd;
+    out.combat.maneuvers = ownAll(maneuvers, "maneuvertype").map((m) => ({
+        name: attr(m, "name"),
+        cmb: num(attr(m, "cmb")),
+        cmd: num(attr(m, "cmd")),
+    }));
 
-    out.combat.initiative = num(attr(own(character, "initiative"), "total"));
+    const initiative = own(character, "initiative");
+    out.combat.initiative = num(attr(initiative, "total"));
+    out.combat.initiativeParts = {
+        ability: num(attr(initiative, "attrtext")),
+        misc: num(attr(initiative, "misctext")),
+    };
+
+    for (const penalty of ownAll(own(character, "penalties"), "penalty")) {
+        const name = attr(penalty, "name").toLowerCase();
+        if (name === "armor check penalty") out.combat.armorCheckPenalty = num(attr(penalty, "value"));
+        else if (name === "max dex bonus") out.combat.maxDex = num(attr(penalty, "value"));
+    }
     // Current effective speed (already reduced for armor/load), matching HL's own sheet, and the
     // speed before that reduction - HL's "Speed 30/20" is <basespeed>/<speed>.
     const movement = own(character, "movement");
@@ -224,6 +278,7 @@ function parseCombat(character: Element, out: PF1Character): void {
             damage: attr(weapon, "damage"),
             critical: attr(weapon, "crit"),
             damageType: attr(weapon, "typetext"),
+            range: attr(own(weapon, "rangedattack"), "rangeinctext") || attr(weapon, "rangeinctext"),
             notes: "",
             kind,
         });
@@ -245,12 +300,16 @@ function parseSkills(character: Element, out: PF1Character): void {
             classSkill: attr(skill, "classskill") === "yes",
             trainedOnly: attr(skill, "trainedonly") === "yes",
             total: num(attr(skill, "value")),
-            // HL doesn't expose a clean "misc only" breakdown; total is the source of truth,
-            // this is just a best-effort remainder for display purposes.
+            abilityMod: num(attr(skill, "attrbonus")),
+            armorCheck: attr(skill, "armorcheck") === "yes",
+            // HL doesn't export a "misc only" figure; total is the source of truth and misc is the
+            // remainder after ability, ranks and the class-skill +3 (so it includes armor check penalty).
             miscMod:
                 num(attr(skill, "value")) -
                 num(attr(skill, "ranks")) -
-                abilityModifier(out.abilities[ABILITY_ABBR_TO_KEY[abilityAbbr] ?? "str"]) -
+                (attr(skill, "attrbonus")
+                    ? num(attr(skill, "attrbonus"))
+                    : abilityModifier(out.abilities[ABILITY_ABBR_TO_KEY[abilityAbbr] ?? "str"])) -
                 (attr(skill, "classskill") === "yes" && num(attr(skill, "ranks")) > 0 ? 3 : 0),
         });
     }

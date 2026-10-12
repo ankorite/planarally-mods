@@ -82,8 +82,8 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/main.ts` — entry point: registers the shape tab and the tracker → sheet HP sync
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
-- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Adjustments / Feats / Spells / Resources /
-  Specials / Inventory tabs, or Core / Combat / Skills / Adjustments / Spells / Resources / Specials for a
+- `src/CharSheet.vue` — the sheet UI (Sheet / Spells / Resources / Adjustments / Feats / Specials /
+  Inventory / Token tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token for a
   monster/NPC; Spells and Resources only when there are spells / limited-use resources)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
@@ -126,6 +126,34 @@ Known limitations:
 - Archetypes are kept as part of the class name (`"Oracle (Dual-Cursed Oracle)"`), as Hero Lab exports them.
 - Only the first `<character>` in a file is imported.
 
+## The sheet
+
+The **Sheet** tab is laid out like Hero Lab's printed character sheet: black section bars, black
+labels ("STR / Strength"), boxed numbers, and the paper sheet's breakdowns:
+
+- the class line, race, size, gender, age, alignment and deity
+- **Abilities**: score, modifier, and a temp adjustment / temp modifier when an adjustment changes it
+  (hover a score for Hero Lab's base score)
+- **HP** (total, current - the one editable number - and nonlethal), hit dice, **Initiative** = Dex + misc,
+  **Speed** with armor and base speed, armor check penalty and max Dex
+- **AC** = 10 + armor + shield + Dex + size + natural + deflection + dodge + misc, then touch and flat-footed
+- **Saving throws** = base + ability + magic (resistance) + misc, and Hero Lab's situational modifiers
+- **Base attack bonus** with the melee / ranged attack lines, **CMB** = BAB + Str + size/misc and
+  **CMD** = 10 + BAB + Str + Dex + size/misc (and flat-footed CMD)
+- a **Weapon** block per attack: attack bonus, critical, type, range and damage
+- **Skills**: total = ability + ranks + misc, with class skill ✓, trained-only (T) and armor-check (A) flags
+- **Combat maneuvers**, **Languages**, **Money & experience**
+
+Highlighted totals are roll buttons: click one to roll it. Whatever the Adjustments tab adds shows up in
+a **Temp** box next to the breakdown, so the imported numbers stay visible. The **M** boxes put a roll in
+PlanarAlly's dice macros (initiative, each save, each weapon, each skill).
+
+The breakdowns need an import made with this version; an older import shows the totals only until it
+is re-imported.
+
+The **Token** tab has what acts on the token itself: **Push HP to tracker**, the auras with **Create /
+update auras on the token**, and the Custom Data buttons. The other tabs use the same black bars.
+
 ## Monsters and NPCs
 
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
@@ -133,13 +161,12 @@ monster or NPC from Hero Lab the same way as a character and import it on the to
 full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
 macros) but only has these tabs:
 
-- **Core**: race, size, classes, ability scores with check rolls, auras and the Custom Data buttons
-- **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
-- **Skills**: skills with roll buttons and the Macro column
+- **Sheet**: the paper-style front page (see The sheet)
 - **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
 - **Spells**: only when it has spells, as on the full sheet (see Spells)
 - **Resources**: only when it has limited-use abilities or spell slots, as on the full sheet
 - **Specials**: Hero Lab's special abilities
+- **Token**: HP push, auras and Custom Data
 
 **Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
 encounter with five orcs from one import. The mod API can't create tokens, so it uses PlanarAlly's own
@@ -259,9 +286,9 @@ HP syncs both ways with the token's tracker named "HP" (case- and space-insensit
 
 ## Dice rolls
 
-Roll buttons are on the Core tab (ability checks), Skills tab, and Combat tab (initiative, saves, CMB
-and the attacks table). Each weapon gets one button per iterative attack, labelled with its bonus
-(`+13` `+8` `+3`), plus **Dmg** when the damage has dice.
+The highlighted totals on the Sheet tab are the roll buttons: ability modifiers (checks), initiative,
+saves, CMB, skills and the weapons. Each weapon gets one button per iterative attack, labelled with its
+bonus (`+13` `+8` `+3`), and its damage is a button when it has dice.
 
 Every button rolls against the token's Custom Data fields rather than a fixed number, e.g.
 `1d20 + {STR mod}`, `1d20 + {Spellcraft}`, `1d20 + {Atk greatsword} - 5`, `{Roll Damage greatsword}`. Editing a value in
@@ -281,7 +308,7 @@ damage formula (the `Roll Damage <weapon>` macro).
 
 ## Custom Data export
 
-Every import (and the Core tab's **Export to Custom Data** button) writes the sheet into the token's
+Every import (and the Token tab's **Export to Custom Data** button) writes the sheet into the token's
 Custom Data under the source `pf1e-sheet`. Only that source is ever changed: elements you made in
 PlanarAlly are never touched, and **Remove sheet data from Custom Data** deletes only what the sheet
 wrote.
@@ -297,13 +324,13 @@ What is written:
   from it, so one edit moves them all).
 - Roll macros, at the top level rather than in a branch:
     - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`, each of which can be switched
-      off with the **Dice macros** checkboxes under the Combat tab's saves (the buttons keep working)
+      off with its **M** box on the Sheet tab (the roll buttons keep working)
     - per weapon, `Roll Attack <weapon>` (`1d20 + {Atk <weapon>}`), or one per attack for iterative
       attacks (`+13/+8/+3` → `Roll Attack <weapon> 1st|2nd|3rd`: `1d20 + {Atk <weapon>}`, `... - 5`,
       `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6").
-      Every weapon is included until you untick it in the **Macro** column of the Combat tab's attacks
-      table; its sheet buttons keep working either way.
-    - `Roll <skill>` for each skill ticked in the **Macro** column of the Skills tab. The choice is
+      Every weapon is included until you untick the **M** box on its Weapon block; its sheet buttons
+      keep working either way.
+    - `Roll <skill>` for each skill ticked in the **M** column of the Sheet tab's skills. The choice is
       saved with the character and kept when you re-import (as is the attack choice).
     - `Cast <spell>` for each spell ticked in the **Macro** column of the Spells tab, with its formula
       (see Spells).
@@ -328,7 +355,7 @@ Auras are created from the Hero Lab specials:
 - A few **ranged abilities** listed elsewhere in Hero Lab get the same kind of aura for their range:
   currently the oracle's **Life Link** (e.g. 140 ft., the reach of its bonds).
 
-The Core tab lists them with a **Create / update auras on the token** button. The sheet only manages
+The Token tab lists them with a **Create / update auras on the token** button. The sheet only manages
 auras it created: re-importing updates changed radii, removes auras Hero Lab no longer lists and
 recreates deleted ones, while auras you made by hand are never touched. To hide a sheet aura without
 it coming back on the next import, switch it off in PlanarAlly instead of deleting it. Radii are in

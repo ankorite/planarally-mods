@@ -3,6 +3,13 @@
 ## [2026-10-09]
 
 - pf1e-char-sheet v0.22.0-beta.3:
+    - new **Sheet** tab laid out like Hero Lab's printed sheet (black bars, labels and boxed numbers)
+      with the paper breakdowns: AC = 10 + armor + shield + Dex..., saves = base + ability + magic +
+      misc, initiative, CMB / CMD, ability base scores, weapon blocks, skills = ability + ranks + misc,
+      combat maneuvers, languages, money and XP. Adjustments show in a Temp box. Highlighted totals
+      roll; M boxes choose the dice macros. It replaces the Core, Combat and Skills tabs; HP push,
+      auras and Custom Data moved to a new **Token** tab, and the other tabs use the same style.
+      Re-import to fill in the breakdowns
     - Resources tab: every limited-use ability, charged item and spell level's slots with its uses
       left (− / + or type a number), kept on the sheet whether or not it is tracked on the token; a
       tracked one stays in step with its tracker both ways. **New day** refills the daily ones
