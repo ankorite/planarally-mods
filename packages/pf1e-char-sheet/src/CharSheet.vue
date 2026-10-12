@@ -1262,14 +1262,28 @@ function spellText(spell: SpellEntry): string {
 
 const card = ref<(RuleCard & { x: number; y: number; pinned: boolean; note?: string }) | null>(null);
 let cardHideTimer: ReturnType<typeof setTimeout> | undefined;
+let cardShowTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** How long the mouse has to rest on a name before its card appears on hover (a click shows it at once). */
+const CARD_HOVER_DELAY_MS = 3000;
 
 function showCard(c: RuleCard, event: MouseEvent): void {
     if (card.value?.pinned) return;
     clearTimeout(cardHideTimer);
-    card.value = { ...c, x: event.clientX, y: event.clientY, pinned: false };
+    clearTimeout(cardShowTimer);
+    const { clientX: x, clientY: y } = event;
+    // Moving from one name to the next while a card is already showing swaps it straight away.
+    if (card.value) {
+        card.value = { ...c, x, y, pinned: false };
+        return;
+    }
+    cardShowTimer = setTimeout(() => {
+        if (!card.value?.pinned) card.value = { ...c, x, y, pinned: false };
+    }, CARD_HOVER_DELAY_MS);
 }
 
 function hideCard(): void {
+    clearTimeout(cardShowTimer);
     if (!card.value || card.value.pinned) return;
     clearTimeout(cardHideTimer);
     // A short delay, so the mouse can move onto the card itself (to scroll it) without it vanishing.
@@ -1286,12 +1300,19 @@ function keepCard(): void {
 function pinCard(c: RuleCard, event: MouseEvent): void {
     if ((event.target as HTMLElement | null)?.closest("input, label, button")) return;
     clearTimeout(cardHideTimer);
+    clearTimeout(cardShowTimer);
     card.value = { ...c, x: event.clientX, y: event.clientY, pinned: true };
 }
 
 function closeCard(): void {
+    clearTimeout(cardShowTimer);
     card.value = null;
 }
+
+onBeforeUnmount(() => {
+    clearTimeout(cardShowTimer);
+    clearTimeout(cardHideTimer);
+});
 
 const cardStyle = computed(() => {
     const c = card.value;

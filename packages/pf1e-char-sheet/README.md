@@ -171,7 +171,7 @@ the sheet. Hiding a section or tab only hides it.
 
 ## Rule cards
 
-Hovering a skill, feat, spell or special shows a rule card: the name in a black bar, a details line
+Resting the mouse on a skill, feat, spell or special for 3 seconds shows a rule card: the name in a black bar, a details line
 (a skill's breakdown and flags, a feat's category, a spell's level, school, casting time, range,
 duration and DC, a special's type, source and uses) and the rules text in paragraphs with
 **Benefit:** / **Check:**-style labels in bold. Moving onto the card keeps it open; clicking a name
