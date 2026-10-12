@@ -183,19 +183,19 @@ compendium has an **Open in compendium** button, which opens that rule's page in
 
 ## Compendium
 
-On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells
-and skills is stored **once per campaign** instead of on every token's sheet:
+On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells,
+skills and a character's specials is stored **once per campaign** instead of on every token's sheet:
 
-- On import, any feat, spell or skill text the campaign doesn't have yet is saved in a shared room data
-  block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats, Spells by
-  school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
-  the short excerpts, which cuts a typical character's sheet data by about two thirds.
+- On import, any feat, spell, skill or special text the campaign doesn't have yet is saved in a shared
+  room data block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats,
+  Spells by school, Skills, Specials by category or source), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
+  the short excerpts, which cuts a typical character's sheet data by about three quarters.
 - Characters imported before (or on a server without the compendium) move their text to the compendium
   the first time their sheet is opened, as a re-import would.
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
-- Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
-- A server without the compendium keeps the text on each sheet, as before. Characters imported before
-  this keep their text until they are re-imported.
+- A monster's or NPC's specials stay on its DM-only sheet, so its own abilities never appear in the
+  players' compendium (its feats, spells and skills are general rules and do go there).
+- A server without the compendium keeps the text on each sheet, as before.
 - The Diagnostics health check reports the compendium's size and this sheet's size.
 
 ## Monsters and NPCs

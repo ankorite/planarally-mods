@@ -460,10 +460,10 @@ async function onFileSelected(event: Event): Promise<void> {
             }
         }
 
-        // The full rules text of feats, spells and skills goes to the campaign's compendium (once,
+        // The full rules text of feats, spells, skills (and a character's specials) goes to the campaign's compendium (once,
         // shared by every token) when the server has one; the sheet keeps the excerpts.
         try {
-            const added = moveRulesToCompendium(api, character);
+            const added = moveRulesToCompendium(api, character, isCharacter.value);
             if (added) notes.push(`Compendium: added ${added} rule${added === 1 ? "" : "s"} to "PF1e (Hero Lab)".`);
         } catch (e) {
             console.error("[pf1e-sheet] storing rules text in the compendium failed", e);
@@ -1210,11 +1210,12 @@ watch(
         const hasText =
             c.feats.some((f) => f.fullText) ||
             c.skills.some((s) => s.description) ||
-            c.spellcasting.some((sc) => sc.spells.some((sp) => sp.fullText));
+            c.spellcasting.some((sc) => sc.spells.some((sp) => sp.fullText)) ||
+            (isCharacter.value && (c.specials ?? []).some((sp) => sp.fullText));
         if (!hasText) return;
         try {
             const copy = JSON.parse(JSON.stringify(c)) as PF1Character;
-            const added = moveRulesToCompendium(api, copy);
+            const added = moveRulesToCompendium(api, copy, isCharacter.value);
             write(copy);
             save();
             console.info(`[pf1e-sheet] moved this sheet's rules text to the compendium (${added} new entries)`);
@@ -1271,7 +1272,13 @@ function specialCard(sp: SpecialEntry): RuleCard {
     const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
         Boolean,
     );
-    return { title: sp.name, meta: meta.length ? [meta.join(" · ")] : [], body: sp.fullText || sp.description };
+    return {
+        title: sp.name,
+        meta: meta.length ? [meta.join(" · ")] : [],
+        body: sp.fullText || ruleText("special", sp.name) || sp.description,
+        // A monster's specials stay on its sheet, not in the compendium.
+        rule: isCharacter.value ? { kind: "special", name: sp.name } : undefined,
+    };
 }
 
 function spellCard(spell: SpellEntry): RuleCard {
