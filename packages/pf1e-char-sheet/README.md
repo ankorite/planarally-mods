@@ -169,6 +169,15 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
 the sheet. Hiding a section or tab only hides it.
 
+## Rule cards
+
+Hovering a skill, feat, spell or special shows a rule card: the name in a black bar, a details line
+(a skill's breakdown and flags, a feat's category, a spell's level, school, casting time, range,
+duration and DC, a special's type, source and uses) and the rules text in paragraphs with
+**Benefit:** / **Check:**-style labels in bold. Moving onto the card keeps it open; clicking a name
+pins it, so long text can be scrolled. A pinned card for a feat, spell or skill that is in PlanarAlly's
+compendium has an **Open in compendium** button, which opens that rule's page in the compendium panel.
+
 ## Compendium
 
 On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells
@@ -178,10 +187,8 @@ and skills is stored **once per campaign** instead of on every token's sheet:
   block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats, Spells by
   school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
   the short excerpts, which cuts a typical character's sheet data by about two thirds.
-- Hover text on the sheet reads from the compendium, and clicking a feat, spell or skill name (dotted
-  underline) opens its page in PlanarAlly's compendium panel. (The mod API can't navigate the panel, so
-  the sheet searches it for the name; should a PlanarAlly update change the panel, the click shows
-  PlanarAlly's rule popover instead.)
+- Characters imported before (or on a server without the compendium) move their text to the compendium
+  the first time their sheet is opened, as a re-import would.
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
 - Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
 - A server without the compendium keeps the text on each sheet, as before. Characters imported before

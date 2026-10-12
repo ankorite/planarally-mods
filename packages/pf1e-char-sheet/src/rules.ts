@@ -133,6 +133,11 @@ export function ruleText(kind: RuleKind, name: string): string {
     return fromCompendium ?? block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
 }
 
+/** Whether a rule is registered in PlanarAlly's compendium (so its page can be opened). */
+export function ruleRegistered(kind: RuleKind, name: string): boolean {
+    return compendiumSystem(gameApi)?.getEntry?.(ruleRef(kind, name)) !== undefined;
+}
+
 /** PlanarAlly's reference to a rule, for its rule popover and for chat links: "pf1e-sheet/feat-power-attack". */
 export function ruleRef(kind: RuleKind, name: string): string {
     return `${modTag}/${ruleId(kind, name)}`;
@@ -150,7 +155,14 @@ export function ruleRef(kind: RuleKind, name: string): string {
 export async function openRule(api: GameApi, kind: RuleKind, name: string, event: MouseEvent): Promise<boolean> {
     const compendium = compendiumSystem(api);
     const ref = ruleRef(kind, name);
-    if (!compendium?.getEntry?.(ref)) return false;
+    if (!compendium?.getEntry) {
+        console.info("[pf1e-sheet] compendium: this PlanarAlly has no compendium system to open");
+        return false;
+    }
+    if (!compendium.getEntry(ref)) {
+        console.info(`[pf1e-sheet] compendium: ${ref} isn't registered - re-import the character to add it`);
+        return false;
+    }
     const { clientX, clientY } = event;
 
     try {
@@ -172,6 +184,9 @@ export async function openRule(api: GameApi, kind: RuleKind, name: string, event
                 panel.click(); // the panel's own click handler brings it in front of other dialogs
                 return true;
             }
+            console.info(`[pf1e-sheet] compendium: no search result for "${name}"; showing the popover instead`);
+        } else {
+            console.info("[pf1e-sheet] compendium: panel not found; showing the popover instead");
         }
     } catch (e) {
         console.warn("[pf1e-sheet] couldn't open the compendium page", e);
