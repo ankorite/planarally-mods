@@ -326,6 +326,12 @@ function parseFeats(character: Element, out: PF1Character): void {
             name: attr(feat, "name"),
             description: excerpt(text),
             fullText: fullText(text),
+            category:
+                attr(feat, "categorytext") ||
+                ownAll(feat, "featcategory")
+                    .map((c) => c.textContent?.trim() ?? "")
+                    .filter(Boolean)
+                    .join(", "),
         });
     }
     out.feats = feats;

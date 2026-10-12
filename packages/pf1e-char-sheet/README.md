@@ -105,7 +105,8 @@ On import the sheet is filled with:
 - HP, AC (normal / touch / flat-footed), saves, BAB, CMB/CMD, initiative, speed
 - melee and ranged attacks
 - skills (ranks, class-skill flag, trained-only, total)
-- feats and spells, with a short excerpt inline and the full rules text on hover (ⓘ)
+- feats and spells, with a short excerpt inline and the full rules text on hover (anywhere on a feat or
+  special shows its name, category / type, source and uses, then the rules text)
 - spellcasting per class (caster level, concentration, slots/day, known spells with DC, range and
   duration), grouped by spell level; spells without a spell class, such as a monster's racial
   spellcasting, get their own group

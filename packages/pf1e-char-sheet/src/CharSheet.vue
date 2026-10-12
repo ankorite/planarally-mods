@@ -35,6 +35,7 @@ import {
     type AdjustmentEffect,
     type AdjustmentState,
     type AdjustmentTarget,
+    type FeatEntry,
     type PF1Character,
     SHEET_SECTIONS,
     type SheetConfig,
@@ -1176,6 +1177,24 @@ function skillTooltip(row: (typeof skillRows.value)[number]): string {
         .join("\n");
 }
 
+/** A feat's hover text: name and categories, then the full rules text. */
+function featTooltip(feat: FeatEntry): string {
+    const head = feat.category ? `${feat.name} [${feat.category}]` : feat.name;
+    const body = feat.fullText || feat.description;
+    return body ? `${head}\n\n${body}` : head;
+}
+
+/** A special's hover text: name, Hero Lab's type and source, its uses if limited, then the rules text. */
+function specialTooltip(sp: SpecialEntry): string {
+    const resource = resourceForSpecial(sp);
+    const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
+        Boolean,
+    );
+    const head = [sp.name, meta.join(" · ")].filter(Boolean).join("\n");
+    const body = sp.fullText || sp.description;
+    return body ? `${head}\n\n${body}` : head;
+}
+
 const shownSkillRows = computed(() => {
     const hidden = new Set(data.value.sheetConfig?.hiddenSkills ?? []);
     return skillRows.value.filter((r) => !hidden.has(r.skill.name));
@@ -1883,9 +1902,10 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
             <ul class="feat-list">
-                <li v-for="(feat, i) of data.feats" :key="i">
+                <li v-for="(feat, i) of data.feats" :key="i" class="hover-info" :title="featTooltip(feat)">
                     <strong>{{ feat.name }}</strong>
-                    <span v-if="feat.fullText" class="info-icon" :title="feat.fullText" aria-label="Full text">ⓘ</span>
+                    <span v-if="feat.category" class="special-source">{{ feat.category }}</span>
+                    <span v-if="feat.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
@@ -2042,7 +2062,7 @@ function fmt(n: number): string {
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
                 <h5>{{ group.category }}</h5>
                 <ul class="feat-list">
-                    <li v-for="sp of group.entries" :key="sp.name">
+                    <li v-for="sp of group.entries" :key="sp.name" class="hover-info" :title="specialTooltip(sp)">
                         <label v-if="resourceForSpecial(sp)" class="track-toggle" title="Keep a tracker on the token">
                             <input
                                 type="checkbox"
@@ -2055,7 +2075,7 @@ function fmt(n: number): string {
                         </label>
                         <strong>{{ sp.name }}</strong>
                         <span v-if="sp.source" class="special-source">{{ sp.source }}</span>
-                        <span v-if="sp.fullText" class="info-icon" :title="sp.fullText" aria-label="Full text">ⓘ</span>
+                        <span v-if="sp.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                         <div class="hint">{{ sp.description }}</div>
                     </li>
                 </ul>
@@ -2916,6 +2936,10 @@ function fmt(n: number): string {
     // Native title-attribute tooltip trigger. Deliberately not a custom CSS popup: this
     // server has already shown global styles can leak into our elements in surprising ways
     // (see the earlier feats-as-columns bug), and the browser's own tooltip is immune to that.
+    .hover-info {
+        cursor: help;
+    }
+
     .info-icon {
         display: inline-block;
         margin-left: 0.3rem;

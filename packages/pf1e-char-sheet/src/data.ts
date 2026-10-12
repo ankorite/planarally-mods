@@ -174,6 +174,8 @@ export interface FeatEntry {
     description: string;
     /** Full untruncated rules text, shown on hover. May be empty if not available. */
     fullText: string;
+    /** Hero Lab's feat categories, e.g. "Combat, Mythic". Optional for older saves. */
+    category?: string;
 }
 
 export interface SpellEntry {

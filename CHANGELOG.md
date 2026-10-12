@@ -11,7 +11,8 @@
       auras and Custom Data moved to a new **Token** tab, and the other tabs use the same style.
       Re-import to fill in the breakdowns
     - hovering a skill shows its Hero Lab rules text with the total's breakdown and any situational
-      modifier (marked *), like Hero Lab Classic; re-import to fill it in
+      modifier (marked *), like Hero Lab Classic; re-import to fill it in. Feats (with their
+      category) and specials (with type, source and uses) show their rules text on hover the same way
     - **Config** tab: hide Sheet sections, individual weapons and skills (or every skill without
       ranks) and whole tabs, per character and kept across re-imports; hidden weapons and skills also
       leave the dice macros
