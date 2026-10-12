@@ -162,6 +162,10 @@ export interface SkillEntry {
     abilityMod?: number;
     /** The armor check penalty applies. */
     armorCheck?: boolean;
+    /** Hero Lab's rules text for the skill, shown on hover. Optional for older saves. */
+    description?: string;
+    /** Situational modifiers, e.g. "Speed greater/less than 30 ft.: -4 to jump". */
+    situational?: string;
 }
 
 export interface FeatEntry {

@@ -141,7 +141,8 @@ labels ("STR / Strength"), boxed numbers, and the paper sheet's breakdowns:
 - **Base attack bonus** with the melee / ranged attack lines, **CMB** = BAB + Str + size/misc and
   **CMD** = 10 + BAB + Str + Dex + size/misc (and flat-footed CMD)
 - a **Weapon** block per attack: attack bonus, critical, type, range and damage
-- **Skills**: total = ability + ranks + misc, with class skill ✓, trained-only (T) and armor-check (A) flags
+- **Skills**: total = ability + ranks + misc, with class skill ✓, trained-only (T) and armor-check (A) flags;
+  hover a skill for its breakdown, situational modifiers (marked *) and Hero Lab's rules text
 - **Combat maneuvers**, **Languages**, **Money & experience**
 
 Highlighted totals are roll buttons: click one to roll it. Whatever the Adjustments tab adds shows up in

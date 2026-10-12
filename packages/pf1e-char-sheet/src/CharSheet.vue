@@ -1156,6 +1156,26 @@ const skillRows = computed(() =>
     }),
 );
 
+/** A skill's hover text, like Hero Lab Classic's: the total and its parts, then the rules text. */
+function skillTooltip(row: (typeof skillRows.value)[number]): string {
+    const s = row.skill;
+    const parts = [`ability ${fmt(row.abilityMod)}`, `ranks ${row.ranks}`, `misc ${fmt(row.misc)}`];
+    if (row.temp !== undefined) parts.push(`temp ${fmt(row.temp)}`);
+    const flags = [
+        s.classSkill ? "Class skill." : "",
+        s.trainedOnly ? "Trained only." : "",
+        s.armorCheck ? "Armor check penalty applies." : "",
+    ].filter(Boolean);
+    return [
+        `${s.name} (${s.ability.toUpperCase()}) ${fmt(s.total)} = ${parts.join(", ")}`,
+        flags.join(" "),
+        s.situational ? `Situational: ${s.situational}` : "",
+        s.description ? `\n${s.description}` : "",
+    ]
+        .filter(Boolean)
+        .join("\n");
+}
+
 const shownSkillRows = computed(() => {
     const hidden = new Set(data.value.sheetConfig?.hiddenSkills ?? []);
     return skillRows.value.filter((r) => !hidden.has(r.skill.name));
@@ -1659,8 +1679,11 @@ function fmt(n: number): string {
                                     <td class="flags">
                                         <span v-if="row.skill.classSkill" title="Class skill">✓</span>
                                     </td>
-                                    <td>
+                                    <td class="skill-name" :title="skillTooltip(row)">
                                         {{ row.skill.name }}
+                                        <span v-if="row.skill.situational" class="flag" title="Situational modifier"
+                                            >*</span
+                                        >
                                         <span class="skill-ability">{{ row.skill.ability.toUpperCase() }}</span>
                                         <span v-if="row.skill.trainedOnly" class="flag" title="Trained only">T</span>
                                         <span
@@ -1705,8 +1728,8 @@ function fmt(n: number): string {
                         </table>
                     </div>
                     <div class="small-note">
-                        ✓ class skill · T trained only · A armor check penalty applies · misc includes the class-skill
-                        +3 and armor check penalty
+                        Hover a skill for its rules text. ✓ class skill · T trained only · A armor check penalty applies
+                        · * situational modifier · misc includes the class-skill +3 and armor check penalty
                     </div>
                 </section>
 
@@ -2524,6 +2547,10 @@ function fmt(n: number): string {
             .temp-inline {
                 color: #a35a00;
                 font-weight: 700;
+            }
+
+            .skill-name {
+                cursor: help;
             }
 
             .skill-ability {

@@ -302,6 +302,8 @@ function parseSkills(character: Element, out: PF1Character): void {
             total: num(attr(skill, "value")),
             abilityMod: num(attr(skill, "attrbonus")),
             armorCheck: attr(skill, "armorcheck") === "yes",
+            description: (own(skill, "description")?.textContent ?? "").trim(),
+            situational: attr(own(skill, "situationalmodifiers"), "text"),
             // HL doesn't export a "misc only" figure; total is the source of truth and misc is the
             // remainder after ability, ranks and the class-skill +3 (so it includes armor check penalty).
             miscMod:
