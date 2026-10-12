@@ -164,7 +164,7 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 - **Sheet sections**: switch off any block of the Sheet tab (e.g. Combat maneuvers, Money and experience).
 - **Weapons**: hide individual weapons, e.g. a bite or unarmed strike you never use.
 - **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
-- **Rule cards**: how many seconds to hover before a rule card appears (default 3; saved for this
+- **Rule cards**: how many seconds to hover before a rule card appears (default 2; saved for this
   browser, for every sheet).
 - **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
 
@@ -173,7 +173,7 @@ the sheet. Hiding a section or tab only hides it.
 
 ## Rule cards
 
-Resting the mouse on a skill, feat, spell or special for 3 seconds (set on the Config tab, per
+Resting the mouse on a skill, feat, spell or special for 2 seconds (set on the Config tab, per
 browser; 0 shows it at once) shows a rule card: the name in a black bar, a details line
 (a skill's breakdown and flags, a feat's category, a spell's level, school, casting time, range,
 duration and DC, a special's type, source and uses) and the rules text in paragraphs with
@@ -259,7 +259,10 @@ from imports made before this version count as melee until the character is re-i
 
 The **Spells** tab lists each spellcasting class (caster level, concentration, slots per day) with its
 spells grouped by level. Each spell shows its DC (hover for the save), range and duration under its
-name, a short excerpt, and the full rules text on hover (ⓘ).
+name; its rules text is on its rule card (rest the mouse on the name, or click it).
+Only spells the character can cast now are listed: Hero Lab also exports spells known above the highest
+level the class can cast yet (an oracle's whole cure line, for instance), and those are left out until
+a re-import after the character can cast them.
 It only appears when the character or creature has spells.
 
 Each spell has a **Macro** checkbox, a formula and a **Roll** button. Hero Lab doesn't export a spell's

@@ -1035,6 +1035,18 @@ function rollDamage(i: number): void {
     void doRoll(`Damage: ${name}`, entry.dmg ? field(entry.dmg) : entry.damage);
 }
 
+/**
+ * The spells a class can cast now: up to the highest level it has slots for. (Imports already drop the
+ * rest; this also tidies sheets imported before that.) A class without slot data - racial spell-likes -
+ * keeps every spell.
+ */
+function castableSpells(sc: SpellcastingClass): SpellEntry[] {
+    const levels = Object.keys(sc.spellsPerDay).map(Number);
+    if (!levels.length) return sc.spells;
+    const max = Math.max(...levels);
+    return sc.spells.filter((s) => s.level <= max);
+}
+
 function spellsByLevel(spells: PF1Character["spellcasting"][number]["spells"]) {
     const byLevel = new Map<number, typeof spells>();
     for (const spell of spells) {
@@ -1289,7 +1301,7 @@ let cardShowTimer: ReturnType<typeof setTimeout> | undefined;
 // Set on the Config tab; it is a preference of whoever is looking, so it is kept per browser like the
 // sheet width, not with the character.
 const CARD_DELAY_KEY = "pf1e-sheet-card-delay";
-const CARD_DELAY_DEFAULT_S = 3;
+const CARD_DELAY_DEFAULT_S = 2;
 const CARD_DELAY_MAX_S = 10;
 
 function loadCardDelay(): number {
@@ -2131,9 +2143,10 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Spells'" class="pf1e-panel">
             <div class="readonly-note">
-                Tick <strong>Macro</strong> to add a spell to PlanarAlly's dice macros as "Cast &lt;spell&gt;". Its
-                formula is guessed from the spell's text at its caster level - edit it if needed (clear it to go back to
-                the guess). Spells without dice start empty.
+                Rest the mouse on a spell's name (or click it) for its rules text. Tick <strong>Macro</strong> to add a
+                spell to PlanarAlly's dice macros as "Cast &lt;spell&gt;". Its formula is guessed from the spell's text
+                at its caster level - edit it if needed (clear it to go back to the guess). Spells without dice start
+                empty.
                 <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
             </div>
             <div v-for="(sc, i) of data.spellcasting" :key="i" class="spell-class">
@@ -2147,7 +2160,7 @@ function fmt(n: number): string {
                         Lv{{ level }}: {{ slots === -1 ? "at will" : `${slots}/day` }}
                     </span>
                 </div>
-                <div v-for="group of spellsByLevel(sc.spells)" :key="group.level" class="spell-level-group">
+                <div v-for="group of spellsByLevel(castableSpells(sc))" :key="group.level" class="spell-level-group">
                     <h5>Level {{ group.level }}</h5>
                     <ul class="spell-rows">
                         <li v-for="spell of group.spells" :key="spell.name" class="spell-row">
@@ -2179,7 +2192,6 @@ function fmt(n: number): string {
                                         </button>
                                     </span>
                                 </div>
-                                <div class="hint">{{ spell.description }}</div>
                             </div>
                             <div class="spell-controls">
                                 <label :title="`Show Cast ${spell.name} in PlanarAlly's dice macros`">

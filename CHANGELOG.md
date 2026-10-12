@@ -8,9 +8,12 @@
       of on every sheet (about two thirds smaller); the sheet reads the text from the compendium. Older
       sheets move their text there when first opened. Specials stay on the sheet. Uses
       `@planarally/mod-api` 0.2.0; older servers keep the text on the sheet
-    - skills, feats, spells and specials show a styled rule card after a hover (3 seconds by default, set
+    - skills, feats, spells and specials show a styled rule card after a hover (2 seconds by default, set
       on the Config tab) instead of a plain tooltip;
       click to pin it, and a pinned card can open the rule's compendium page
+    - the Spells tab lists only spells the character can cast now (Hero Lab also exports spells known
+      above the class's highest castable level) and no longer repeats each spell's text, which is on
+      its rule card
     - each spell shows its casting defensively check (concentration bonus, +4 with Combat Casting,
       vs DC 15 + 2 × spell level) with a Roll button
 
