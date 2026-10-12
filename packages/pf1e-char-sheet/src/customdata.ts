@@ -124,6 +124,10 @@ export function damageFormula(text: string): string | undefined {
  * character's enabled adjustments are applied first, so the numbers, macros and roll buttons all
  * include them. Pass the stored character, not an already-adjusted copy.
  */
+/** The fixed roll macros, which the Sheet tab can switch off one by one. */
+export const ROLL_MACROS = ["Initiative", "Fortitude", "Reflex", "Will"] as const;
+export type RollMacro = (typeof ROLL_MACROS)[number];
+
 export function buildSheet(stored: PF1Character): { elements: CdElement[]; names: SheetNames } {
     const c = applyAdjustments(stored);
     const out: CdElement[] = [];
@@ -189,13 +193,21 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
         attacks.push(entry);
     }
 
-    // --- roll macros: initiative, saves, attacks and the skills picked on the Skills tab ---
-    add(MACRO_PREFIX, "Roll Initiative", "dice-expression", checkFormula(init));
-    add(MACRO_PREFIX, "Roll Fortitude", "dice-expression", checkFormula(fort));
-    add(MACRO_PREFIX, "Roll Reflex", "dice-expression", checkFormula(refl));
-    add(MACRO_PREFIX, "Roll Will", "dice-expression", checkFormula(will));
-    // Per weapon: one macro per iterative attack, then its damage - unless unticked on the Combat tab.
-    const excludedAttacks = new Set(c.macroExcludedAttacks ?? []);
+    // --- roll macros: initiative and saves (unless switched off on the Sheet tab), attacks and the
+    // skills picked there ---
+    const excludedRolls = new Set(c.macroExcludedRolls ?? []);
+    const fixed: [RollMacro, string][] = [
+        ["Initiative", init],
+        ["Fortitude", fort],
+        ["Reflex", refl],
+        ["Will", will],
+    ];
+    for (const [roll, field] of fixed) {
+        if (!excludedRolls.has(roll)) add(MACRO_PREFIX, `Roll ${roll}`, "dice-expression", checkFormula(field));
+    }
+    // Per weapon: one macro per iterative attack, then its damage - unless unticked on the Sheet tab.
+    // Weapons and skills hidden on the Config tab are out of the macros too.
+    const excludedAttacks = new Set([...(c.macroExcludedAttacks ?? []), ...(c.sheetConfig?.hiddenWeapons ?? [])]);
     c.combat.attacks.forEach((atk, i) => {
         const entry = attacks[i];
         if (!entry) return;
@@ -212,7 +224,8 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
         }
         if (entry.damage) entry.dmg = add(MACRO_PREFIX, `Roll Damage ${label}`, "dice-expression", entry.damage);
     });
-    const macroSkills = new Set(c.macroSkills ?? []);
+    const hiddenSkills = new Set(c.sheetConfig?.hiddenSkills ?? []);
+    const macroSkills = new Set((c.macroSkills ?? []).filter((n) => !hiddenSkills.has(n)));
     c.skills.forEach((skill, i) => {
         const fieldName = skills[i];
         if (fieldName && macroSkills.has(skill.name)) {

@@ -82,9 +82,9 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/main.ts` — entry point: registers the shape tab and the tracker → sheet HP sync
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
-- `src/CharSheet.vue` — the sheet UI (Core / Combat / Skills / Adjustments / Feats / Spells / Specials /
-  Inventory tabs, or Core / Combat / Skills / Adjustments / Spells / Specials for a monster/NPC; Spells only
-  when there are spells)
+- `src/CharSheet.vue` — the sheet UI (Sheet / Spells / Resources / Adjustments / Feats / Specials /
+  Inventory / Token / Config tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token / Config
+  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -105,7 +105,8 @@ On import the sheet is filled with:
 - HP, AC (normal / touch / flat-footed), saves, BAB, CMB/CMD, initiative, speed
 - melee and ranged attacks
 - skills (ranks, class-skill flag, trained-only, total)
-- feats and spells, with a short excerpt inline and the full rules text on hover (ⓘ)
+- feats and spells, with a short excerpt inline and the full rules text on hover (anywhere on a feat or
+  special shows its name, category / type, source and uses, then the rules text)
 - spellcasting per class (caster level, concentration, slots/day, known spells with DC, range and
   duration), grouped by spell level; spells without a spell class, such as a monster's racial
   spellcasting, get their own group
@@ -126,6 +127,47 @@ Known limitations:
 - Archetypes are kept as part of the class name (`"Oracle (Dual-Cursed Oracle)"`), as Hero Lab exports them.
 - Only the first `<character>` in a file is imported.
 
+## The sheet
+
+The **Sheet** tab is laid out like Hero Lab's printed character sheet: black section bars, black
+labels ("STR / Strength"), boxed numbers, and the paper sheet's breakdowns:
+
+- the class line, race, size, gender, age, alignment and deity
+- **Abilities**: score, modifier, and a temp adjustment / temp modifier when an adjustment changes it
+  (hover a score for Hero Lab's base score)
+- **HP** (total, current - the one editable number - and nonlethal), hit dice, **Initiative** = Dex + misc,
+  **Speed** with armor and base speed, armor check penalty and max Dex
+- **AC** = 10 + armor + shield + Dex + size + natural + deflection + dodge + misc, then touch and flat-footed
+- **Saving throws** = base + ability + magic (resistance) + misc, and Hero Lab's situational modifiers
+- **Base attack bonus** with the melee / ranged attack lines, **CMB** = BAB + Str + size/misc and
+  **CMD** = 10 + BAB + Str + Dex + size/misc (and flat-footed CMD)
+- a **Weapon** block per attack: attack bonus, critical, type, range and damage
+- **Skills**: total = ability + ranks + misc, with class skill ✓, trained-only (T) and armor-check (A) flags;
+  hover a skill for its breakdown, situational modifiers (marked *) and Hero Lab's rules text
+- **Combat maneuvers**, **Languages**, **Money & experience**
+
+Highlighted totals are roll buttons: click one to roll it. Whatever the Adjustments tab adds shows up in
+a **Temp** box next to the breakdown, so the imported numbers stay visible. The **M** boxes put a roll in
+PlanarAlly's dice macros (initiative, each save, each weapon, each skill).
+
+The breakdowns need an import made with this version; an older import shows the totals only until it
+is re-imported.
+
+The **Token** tab has what acts on the token itself: **Push HP to tracker**, the auras with **Create /
+update auras on the token**, and the Custom Data buttons. The other tabs use the same black bars.
+
+### Config tab
+
+The **Config** tab chooses what the sheet shows, per character; the choices are kept when you re-import.
+
+- **Sheet sections**: switch off any block of the Sheet tab (e.g. Combat maneuvers, Money and experience).
+- **Weapons**: hide individual weapons, e.g. a bite or unarmed strike you never use.
+- **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
+- **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
+
+A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
+the sheet. Hiding a section or tab only hides it.
+
 ## Monsters and NPCs
 
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
@@ -133,12 +175,13 @@ monster or NPC from Hero Lab the same way as a character and import it on the to
 full sheet (read-only except current HP; the token is renamed, and gets an HP tracker, auras and dice
 macros) but only has these tabs:
 
-- **Core**: race, size, classes, ability scores with check rolls, auras and the Custom Data buttons
-- **Combat**: HP, AC, saves, initiative, speed, BAB/CMB/CMD, and the attacks with roll buttons
-- **Skills**: skills with roll buttons and the Macro column
+- **Sheet**: the paper-style front page (see The sheet)
 - **Adjustments**: buffs and conditions, as on the full sheet (see Adjustments)
 - **Spells**: only when it has spells, as on the full sheet (see Spells)
+- **Resources**: only when it has limited-use abilities or spell slots, as on the full sheet
 - **Specials**: Hero Lab's special abilities
+- **Token**: HP push, auras and Custom Data
+- **Config**: what the sheet shows (see Config tab)
 
 **Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
 encounter with five orcs from one import. The mod API can't create tokens, so it uses PlanarAlly's own
@@ -205,16 +248,30 @@ you re-import.
 ## Trackers for limited-use abilities
 
 Hero Lab exports every limited-use ability and charged item as a tracked resource ("Darkness (3/day)",
-"Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each becomes a
-PlanarAlly tracker on the token, as does each spell level's slots per day ("Oracle level 1 slots"), so
-uses can be ticked off in play. They're created on import and with **Create / update trackers on the
-token** on the Core tab, which lists them with how their uses work: "3 per day", "20 rounds per day",
-"1 per week", "50 charges" (wands, staffs, rods and anything named with charges), otherwise "N uses".
+"Bardic Performance (20 rounds/day)", "Wand of Cure Light Wounds" with its charges). Each of them, and
+each spell level's slots per day ("Oracle level 1 slots"), is counted on the Resources tab, and any of
+them can also be put on the token as a PlanarAlly tracker by ticking its **Track** box. Nothing is
+tracked on the token until you tick it, so the token only gets the trackers you want.
 
-Trackers never refill on their own, which is right for charges (a wand's don't come back). Reset the
-daily ones yourself after a rest.
+### Resources tab
 
-- New trackers start at the uses left in the Hero Lab export.
+The **Resources** tab (shown when there are any) lists every resource with how its uses work ("3 per
+day", "20 rounds per day", "1 per week", "50 charges" for wands, staffs, rods and anything named with
+charges, otherwise "N uses") and the **uses left**, with − / + buttons and a field to type a number.
+
+- The sheet keeps the uses left for every resource, whether or not it has a tracker on the token.
+- With **Track** ticked (it starts unticked) the resource also has a tracker on the token, and the two stay in step both
+  ways: using one on the sheet updates the tracker, and changing the tracker in PlanarAlly updates
+  the sheet. Unticking removes the tracker but keeps the count; ticking again makes a tracker that
+  starts from the sheet's count.
+- Nothing refills on its own, which is right for charges (a wand's don't come back). **New day**
+  refills the daily ones (x/day, rounds/day, spell slots) and leaves charges and plain uses alone.
+- Re-importing the same character keeps the uses left (full stays full at a new maximum, otherwise
+  capped at it). A new resource, or a different character, starts at Hero Lab's uses left.
+
+### Trackers on the token
+
+- New trackers start at the sheet's uses left (at first, the uses left in the Hero Lab export).
 - Re-importing never refills or overwrites a tracker's current value. It updates the maximum, follows
   Hero Lab's name ("20 rounds/day" → "22 rounds/day") unless you renamed the tracker, creates missing
   ones and removes the ones it made for abilities that are gone.
@@ -222,10 +279,14 @@ daily ones yourself after a rest.
   adding a second one. Other hand-made trackers, and the HP tracker, are never touched.
 - They aren't drawn as bars on the token. On a character they're visible to everyone; on a monster
   or NPC only the DM sees them.
-- Each one can be switched off with its **Track** checkbox on the Specials tab, next to the ability
-  (spell slots and anything else without a matching special are listed under "Other trackers").
-  Unticking removes the tracker from the token; ticking adds it back. The choice is kept when you
-  re-import.
+- Each one is switched on with its **Track** checkbox on the Resources tab, or on the Specials tab
+  next to the ability (spell slots and anything else without a matching special are listed there
+  under "Other trackers"). Ticking adds the tracker; unticking removes it from the token. The choice
+  is kept when you re-import; a resource new in the export starts unticked.
+- Sheets imported before 0.22.0-beta.3, when everything was tracked by default, keep the trackers
+  they have.
+- **Create / update trackers on the token** on the Resources tab re-creates a ticked resource's
+  tracker if it was deleted, and fixes maximums, without a re-import.
 
 ## HP tracker
 
@@ -240,9 +301,9 @@ HP syncs both ways with the token's tracker named "HP" (case- and space-insensit
 
 ## Dice rolls
 
-Roll buttons are on the Core tab (ability checks), Skills tab, and Combat tab (initiative, saves, CMB
-and the attacks table). Each weapon gets one button per iterative attack, labelled with its bonus
-(`+13` `+8` `+3`), plus **Dmg** when the damage has dice.
+The highlighted totals on the Sheet tab are the roll buttons: ability modifiers (checks), initiative,
+saves, CMB, skills and the weapons. Each weapon gets one button per iterative attack, labelled with its
+bonus (`+13` `+8` `+3`), and its damage is a button when it has dice.
 
 Every button rolls against the token's Custom Data fields rather than a fixed number, e.g.
 `1d20 + {STR mod}`, `1d20 + {Spellcraft}`, `1d20 + {Atk greatsword} - 5`, `{Roll Damage greatsword}`. Editing a value in
@@ -262,7 +323,7 @@ damage formula (the `Roll Damage <weapon>` macro).
 
 ## Custom Data export
 
-Every import (and the Core tab's **Export to Custom Data** button) writes the sheet into the token's
+Every import (and the Token tab's **Export to Custom Data** button) writes the sheet into the token's
 Custom Data under the source `pf1e-sheet`. Only that source is ever changed: elements you made in
 PlanarAlly are never touched, and **Remove sheet data from Custom Data** deletes only what the sheet
 wrote.
@@ -277,13 +338,14 @@ What is written:
 - `/attacks`: per weapon, `Atk <weapon>` (the first attack bonus; later iterative attacks are offsets
   from it, so one edit moves them all).
 - Roll macros, at the top level rather than in a branch:
-    - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`
+    - `Roll Initiative`, `Roll Fortitude`, `Roll Reflex`, `Roll Will`, each of which can be switched
+      off with its **M** box on the Sheet tab (the roll buttons keep working)
     - per weapon, `Roll Attack <weapon>` (`1d20 + {Atk <weapon>}`), or one per attack for iterative
       attacks (`+13/+8/+3` → `Roll Attack <weapon> 1st|2nd|3rd`: `1d20 + {Atk <weapon>}`, `... - 5`,
       `... - 10`), then `Roll Damage <weapon>` (the damage dice; none for flat damage like "6").
-      Every weapon is included until you untick it in the **Macro** column of the Combat tab's attacks
-      table; its sheet buttons keep working either way.
-    - `Roll <skill>` for each skill ticked in the **Macro** column of the Skills tab. The choice is
+      Every weapon is included until you untick the **M** box on its Weapon block; its sheet buttons
+      keep working either way.
+    - `Roll <skill>` for each skill ticked in the **M** column of the Sheet tab's skills. The choice is
       saved with the character and kept when you re-import (as is the attack choice).
     - `Cast <spell>` for each spell ticked in the **Macro** column of the Spells tab, with its formula
       (see Spells).
@@ -305,8 +367,10 @@ Auras are created from the Hero Lab specials:
 - **Senses** with a range (Darkvision, Blindsight) become a vision aura of that radius, not drawn.
   Senses without a range (Low-Light Vision, Scent) are skipped.
 - **Auras** with a radius (e.g. Aura of Courage, 10 ft.) become a visible translucent radius aura.
+- A few **ranged abilities** listed elsewhere in Hero Lab get the same kind of aura for their range:
+  currently the oracle's **Life Link** (e.g. 140 ft., the reach of its bonds).
 
-The Core tab lists them with a **Create / update auras on the token** button. The sheet only manages
+The Token tab lists them with a **Create / update auras on the token** button. The sheet only manages
 auras it created: re-importing updates changed radii, removes auras Hero Lab no longer lists and
 recreates deleted ones, while auras you made by hand are never touched. To hide a sheet aura without
 it coming back on the next import, switch it off in PlanarAlly instead of deleting it. Radii are in
@@ -335,7 +399,7 @@ The DM-only **Diagnostics** tab has two read-only reports to copy into a bug rep
 
 When the DM opens a sheet, the mod reads the `version` in this package's `mod.toml` on the repository's
 `main` branch (from `raw.githubusercontent.com`) and compares it with the installed version. If GitHub's
-is newer, a banner at the top of the sheet says so, with a link to the repository. **✕** hides it until
+is newer, a banner at the top of the sheet says so, with a link to the GitHub Releases page to download the new `.pam`. **✕** hides it until
 the next new version.
 
 - Only the DM sees it, and only the DM's browser contacts GitHub, once per page load.

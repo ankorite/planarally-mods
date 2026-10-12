@@ -2,6 +2,34 @@
 
 ## [2026-10-09]
 
+- pf1e-char-sheet v0.22.0-beta.3:
+    - new **Sheet** tab laid out like Hero Lab's printed sheet (black bars, labels and boxed numbers)
+      with the paper breakdowns: AC = 10 + armor + shield + Dex..., saves = base + ability + magic +
+      misc, initiative, CMB / CMD, ability base scores, weapon blocks, skills = ability + ranks + misc,
+      combat maneuvers, languages, money and XP. Adjustments show in a Temp box. Highlighted totals
+      roll; M boxes choose the dice macros. It replaces the Core, Combat and Skills tabs; HP push,
+      auras and Custom Data moved to a new **Token** tab, and the other tabs use the same style.
+      Re-import to fill in the breakdowns
+    - hovering a skill shows its Hero Lab rules text with the total's breakdown and any situational
+      modifier (marked *), like Hero Lab Classic; re-import to fill it in. Feats (with their
+      category) and specials (with type, source and uses) show their rules text on hover the same way
+    - **Config** tab: hide Sheet sections, individual weapons and skills (or every skill without
+      ranks) and whole tabs, per character and kept across re-imports; hidden weapons and skills also
+      leave the dice macros
+    - Resources tab: every limited-use ability, charged item and spell level's slots with its uses
+      left (− / + or type a number), kept on the sheet whether or not it is tracked on the token; a
+      tracked one stays in step with its tracker both ways. **New day** refills the daily ones
+      (not charges). Re-importing the same character keeps the uses left. The trackers list moved
+      here from the Core tab
+    - trackers are opt-in: a resource only gets a tracker on the token once its **Track** box is
+      ticked (sheets imported before keep the trackers they have)
+    - the Initiative, Fortitude, Reflex and Will dice macros can each be switched off on the Combat
+      tab
+    - the Combat tab shows the speed before armor and load next to the effective one ("20 (base
+      30)"), like Hero Lab's "30/20"
+    - the update banner links straight to the GitHub Releases page
+    - the oracle's Life Link becomes a radius aura for its range (e.g. 140 ft.); Hero Lab lists it
+      under other abilities, not auras
 - pf1e-char-sheet v0.22.0-beta.2: the mythic path and tier are imported (Hero Lab only lists them
   in the class summary, e.g. "Hierophant 1") and shown in the Classes table on the Core tab
 

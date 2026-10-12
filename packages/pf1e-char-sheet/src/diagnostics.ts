@@ -12,6 +12,7 @@
 
 import { buildElements, CD_SOURCE } from "./customdata";
 import type { PF1Character } from "./data";
+import { trackedKeys } from "./resources";
 import { resolveFormula } from "./roll";
 import { isHpTrackerName } from "./trackers";
 
@@ -624,7 +625,7 @@ export async function buildHealthCheck(
         ok(
             `trackers on token: ${real.map((t) => `${String(get(t, "name"))} ${String(get(t, "value"))}/${String(get(t, "maxvalue"))}`).join(", ") || "(none)"}`,
         );
-        if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Core tab');
+        if (hp.length === 0) bad('no tracker named "HP" - use "Push HP to tracker" on the Token tab');
         else if (hp.length > 1) bad(`${hp.length} trackers named "HP" - only the first is synced`);
         const first = hp[0];
         if (first !== undefined && get(first, "value") !== current) {
@@ -694,10 +695,10 @@ export async function buildHealthCheck(
         const live = safe(() => callM(system(api, "trackers"), "getAll", shapeId) as unknown[], [] as unknown[]);
         const resources = character.resources ?? [];
         if (!resources.length) ok("the sheet has no limited-use abilities or spell slots for this character");
-        const off = new Set(character.untrackedResources ?? []);
+        const on = new Set(trackedKeys(character));
         for (const r of resources) {
-            if (off.has(r.key)) {
-                ok(`${r.name}: switched off on the Specials tab`);
+            if (!on.has(r.key)) {
+                ok(`${r.name}: not tracked (Track unticked)`);
                 continue;
             }
             const t = r.uuid ? live.find((x) => get(x, "uuid") === r.uuid) : undefined;

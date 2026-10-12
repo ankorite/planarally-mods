@@ -22,17 +22,23 @@ import {
     iterativeBonuses,
     ordinal,
     removeCustomData,
+    ROLL_MACROS,
     syncCustomData,
+    type RollMacro,
 } from "./customdata";
 import {
     abilityModifier,
     emptyCharacter,
     DATA_BLOCK_NAME,
     groupSpecials,
+    type AbilityKey,
     type AdjustmentEffect,
     type AdjustmentState,
     type AdjustmentTarget,
+    type FeatEntry,
     type PF1Character,
+    SHEET_SECTIONS,
+    type SheetConfig,
     type SheetResource,
     type SpecialEntry,
     type SpellcastingClass,
@@ -42,11 +48,20 @@ import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
-import { resourceKeyForName, resourceLabel, syncTrackedResources } from "./resources";
+import {
+    carryUsesLeft,
+    pushUsesLeft,
+    refillsDaily,
+    resourceKeyForName,
+    resourceLabel,
+    syncTrackedResources,
+    trackedKeys,
+    usesLeft,
+} from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { guessSpellFormula, spellFormula, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
-import { logDismissed, newerVersion, REPO_URL } from "./updates";
+import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
 
 const { data, load, save, write } = api.useShapeDataBlock<PF1Character>(DATA_BLOCK_NAME, {
     defaultData: () => emptyCharacter(),
@@ -103,7 +118,7 @@ watch(
 );
 
 // A character gets the full sheet; any other token (monsters, NPCs - the tab only shows for the DM)
-// gets the limited one: core, combat, skills and specials.
+// gets the limited one (no Feats or Inventory tab).
 const isCharacter = computed(() => currentLocalId.value !== undefined && isCharacterShape(api, currentLocalId.value));
 
 const pushStatus = ref("");
@@ -194,20 +209,46 @@ function setWidth(w: WidthKey): void {
     }
 }
 
-const BASE_TABS = ["Core", "Combat", "Skills", "Adjustments", "Feats", "Spells", "Specials", "Inventory"] as const;
-const LIMITED_TABS = ["Core", "Combat", "Skills", "Adjustments", "Spells", "Specials"] as const;
+// "Sheet" is the paper-style front page (abilities, combat, saves, weapons, skills); "Token" has what
+// acts on the token itself (auras, Custom Data, the HP push).
+const BASE_TABS = [
+    "Sheet",
+    "Spells",
+    "Resources",
+    "Adjustments",
+    "Feats",
+    "Specials",
+    "Inventory",
+    "Token",
+    "Config",
+] as const;
+const LIMITED_TABS = ["Sheet", "Spells", "Resources", "Adjustments", "Specials", "Token", "Config"] as const;
+/** Tabs the Config tab can hide (the Sheet, Config and Diagnostics tabs always show). */
+const HIDEABLE_TABS: readonly string[] = [
+    "Spells",
+    "Resources",
+    "Adjustments",
+    "Feats",
+    "Specials",
+    "Inventory",
+    "Token",
+];
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
-const activeTab = ref<TabName>("Core");
+const activeTab = ref<TabName>("Sheet");
 
 // The Diagnostics tab (read-only reports on the sheet and PlanarAlly's mod API) is for the DM only.
 // A DM who has switched to "fake player" (to preview what players see) gets the player view, i.e.
 // no Diagnostics tab either.
 const isDm = computed(() => viewerIsDm(api));
-// The Spells tab only appears for a character or creature that has spells.
+// The Spells and Resources tabs only appear when there are spells / limited-use resources.
 const hasSpells = computed(() => data.value.spellcasting.some((sc) => sc.spells.length > 0));
+const hasResources = computed(() => (data.value.resources ?? []).length > 0);
 const visibleTabs = computed<readonly TabName[]>(() => {
     const all: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
-    const tabs = hasSpells.value ? all : all.filter((t) => t !== "Spells");
+    const hiddenTabs = new Set(data.value.sheetConfig?.hiddenTabs ?? []);
+    const tabs = all.filter(
+        (t) => (t !== "Spells" || hasSpells.value) && (t !== "Resources" || hasResources.value) && !hiddenTabs.has(t),
+    );
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
 
@@ -270,7 +311,7 @@ function dismissUpdate(): void {
 watch(
     visibleTabs,
     (tabs) => {
-        if (!tabs.includes(activeTab.value)) activeTab.value = tabs[0] ?? "Combat";
+        if (!tabs.includes(activeTab.value)) activeTab.value = tabs[0] ?? "Sheet";
     },
     { immediate: true },
 );
@@ -363,9 +404,20 @@ async function onFileSelected(event: Event): Promise<void> {
                 ? character.combat.hp.max
                 : Math.min(prev.combat.hp.current, character.combat.hp.max);
         }
+        // Uses left are play state as well, for the same character.
+        if (prev.importedAt && prev.identity.name === character.identity.name) {
+            character.resources = carryUsesLeft(character.resources ?? [], prev.resources ?? []);
+        }
+        // And the roll macros switched off on the Sheet tab.
+        character.macroExcludedRolls = [...(data.value.macroExcludedRolls ?? [])];
+        // And what the Config tab hides.
+        if (data.value.sheetConfig) {
+            character.sheetConfig = JSON.parse(JSON.stringify(data.value.sheetConfig)) as SheetConfig;
+        }
         // And the trackers switched off on the Specials tab.
         const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
-        character.untrackedResources = (data.value.untrackedResources ?? []).filter((k) => resourceKeys.has(k));
+        character.trackedResources = trackedKeys(data.value).filter((k) => resourceKeys.has(k));
+        delete character.untrackedResources;
         const attackNames = new Set(character.combat.attacks.map((a) => a.name));
         character.macroExcludedAttacks = (data.value.macroExcludedAttacks ?? []).filter((n) => attackNames.has(n));
         const id = currentLocalId.value;
@@ -390,11 +442,17 @@ async function onFileSelected(event: Event): Promise<void> {
                     id,
                     character.resources ?? [],
                     data.value.resources ?? [],
-                    character.untrackedResources ?? [],
+                    character.trackedResources ?? [],
                     isCharacter.value,
                 );
                 character.resources = result.resources;
                 if (result.summary) notes.push(result.summary);
+                const count = character.resources.length;
+                if (count && !(character.trackedResources ?? []).length) {
+                    notes.push(
+                        `${count} limited-use resource${count === 1 ? "" : "s"} on the Resources tab - tick Track to put one on the token.`,
+                    );
+                }
             } catch (e) {
                 console.error("[pf1e-sheet] tracker sync after import failed", e);
                 notes.push("Tracker sync failed - see the console.");
@@ -460,7 +518,7 @@ function isMacroSkill(name: string): boolean {
     return (data.value.macroSkills ?? []).includes(name);
 }
 
-/** The Skills tab's Macro checkbox (skills are out of the macros unless ticked). */
+/** The Sheet tab's skill Macro checkbox (skills are out of the macros unless ticked). */
 function toggleMacroSkill(name: string, on: boolean): void {
     const current = (data.value.macroSkills ?? []).filter((n) => n !== name);
     data.value.macroSkills = on ? [...current, name] : current;
@@ -471,11 +529,22 @@ function isMacroAttack(name: string): boolean {
     return !(data.value.macroExcludedAttacks ?? []).includes(name);
 }
 
-/** The Combat tab's Macro checkbox (attacks are in the macros unless unticked). */
+/** The Sheet tab's weapon Macro checkbox (attacks are in the macros unless unticked). */
 function toggleMacroAttack(name: string, on: boolean): void {
     const current = (data.value.macroExcludedAttacks ?? []).filter((n) => n !== name);
     data.value.macroExcludedAttacks = on ? current : [...current, name];
     applyMacroChange(name, on);
+}
+
+function isRollMacro(roll: RollMacro): boolean {
+    return !(data.value.macroExcludedRolls ?? []).includes(roll);
+}
+
+/** The Sheet tab's initiative / save Macro checkboxes (in the macros unless unticked). */
+function toggleRollMacro(roll: RollMacro, on: boolean): void {
+    const current = (data.value.macroExcludedRolls ?? []).filter((r) => r !== roll);
+    data.value.macroExcludedRolls = on ? current : [...current, roll];
+    applyMacroChange(`Roll ${roll}`, on);
 }
 
 /** Saves a macro choice and re-exports Custom Data so the macro appears or goes right away. */
@@ -531,6 +600,40 @@ function saveAndReexport(message: string): void {
     clearTimeout(macroStatusTimeout);
     macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
 }
+
+// --- Config tab: what the sheet shows ---------------------------------------------------------------
+
+type ConfigList = "hiddenWeapons" | "hiddenSkills" | "hiddenSections" | "hiddenTabs";
+
+function isHidden(list: ConfigList, name: string): boolean {
+    return (data.value.sheetConfig?.[list] as string[] | undefined)?.includes(name) ?? false;
+}
+
+/** Shows or hides one thing. Weapons and skills also leave the dice macros, so those re-export. */
+function setShown(list: ConfigList, name: string, shown: boolean, label = name): void {
+    const config = (data.value.sheetConfig ??= {});
+    const rest = ((config[list] as string[] | undefined) ?? []).filter((n) => n !== name);
+    (config[list] as string[]) = shown ? rest : [...rest, name];
+    const message = `${label}: ${shown ? "shown" : "hidden"}.`;
+    if (list === "hiddenWeapons" || list === "hiddenSkills") saveAndReexport(message);
+    else {
+        save();
+        macroStatus.value = message;
+        clearTimeout(macroStatusTimeout);
+        macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+    }
+}
+
+/** Hides every skill without ranks (or shows every skill again). */
+function hideSkillsWithoutRanks(hide: boolean): void {
+    const config = (data.value.sheetConfig ??= {});
+    config.hiddenSkills = hide ? data.value.skills.filter((s) => s.ranks <= 0).map((s) => s.name) : [];
+    saveAndReexport(hide ? "Skills without ranks hidden." : "All skills shown.");
+}
+
+const configTabs = computed(() =>
+    (isCharacter.value ? BASE_TABS : LIMITED_TABS).filter((t) => HIDEABLE_TABS.includes(t)),
+);
 
 function toggleAdjustment(key: string, name: string, on: boolean): void {
     const state = adjustmentState();
@@ -627,7 +730,7 @@ const resourceStatus = ref("");
 let resourceStatusTimeout: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Brings the token's trackers in line with the sheet: the Core tab's button (re)creates missing ones,
+ * Brings the token's trackers in line with the sheet: the Resources tab's button (re)creates missing ones,
  * and the Specials tab's Track checkboxes add or remove one. Returns the status text.
  */
 function syncTrackersNow(): string {
@@ -635,17 +738,12 @@ function syncTrackersNow(): string {
     if (id === undefined) return "No token selected.";
     try {
         const current = data.value.resources ?? [];
-        const result = syncTrackedResources(
-            api,
-            id,
-            current,
-            current,
-            data.value.untrackedResources ?? [],
-            isCharacter.value,
-        );
+        const result = syncTrackedResources(api, id, current, current, trackedKeys(data.value), isCharacter.value);
         data.value.resources = result.resources;
         save();
-        return result.summary || (current.length ? "Trackers are already up to date." : "No trackers to create.");
+        if (result.summary) return result.summary;
+        if (!trackedKeys(data.value).length) return "Nothing is tracked - tick Track on a resource to add its tracker.";
+        return "Trackers are already up to date.";
     } catch (e) {
         console.error("[pf1e-sheet] tracker sync failed", e);
         return "Tracker sync failed - see the console.";
@@ -658,7 +756,7 @@ function flashResourceStatus(text: string): void {
     resourceStatusTimeout = setTimeout(() => (resourceStatus.value = ""), 6000);
 }
 
-/** The Core tab's button: (re)create missing x/day, x/round and slot trackers, without a re-import. */
+/** The Resources tab's button: (re)create missing x/day, x/round and slot trackers, without a re-import. */
 function resyncResources(): void {
     flashResourceStatus(syncTrackersNow());
 }
@@ -681,22 +779,53 @@ const otherResources = computed(() => {
 });
 
 function isTracked(r: SheetResource): boolean {
-    return !(data.value.untrackedResources ?? []).includes(r.key);
+    return trackedKeys(data.value).includes(r.key);
 }
 
 function toggleTracked(r: SheetResource, on: boolean): void {
-    const off = (data.value.untrackedResources ?? []).filter((k) => k !== r.key);
-    data.value.untrackedResources = on ? off : [...off, r.key];
+    const rest = trackedKeys(data.value).filter((k) => k !== r.key);
+    data.value.trackedResources = on ? [...rest, r.key] : rest;
+    delete data.value.untrackedResources;
     const text = syncTrackersNow();
     flashResourceStatus(
         text === "Trackers are already up to date." ? `${r.name}: ${on ? "tracked" : "not tracked"}.` : text,
     );
 }
 
+// --- Resources tab: uses left, kept on the sheet and mirrored to the token's tracker ---------------
+
+/** Sets a resource's uses left (clamped), saves, and updates its tracker on the token if it has one. */
+function setUsesLeft(r: SheetResource, value: number): void {
+    const left = Math.max(0, Math.min(r.max, Math.round(Number.isFinite(value) ? value : usesLeft(r))));
+    r.left = left;
+    save();
+    const id = currentLocalId.value;
+    if (id === undefined) return;
+    try {
+        pushUsesLeft(api, id, r, left);
+    } catch (e) {
+        console.error("[pf1e-sheet] tracker update failed", e);
+        flashResourceStatus("Updating the tracker failed - see the console.");
+    }
+}
+
+function onUsesInput(r: SheetResource, event: Event): void {
+    const input = event.target as HTMLInputElement;
+    setUsesLeft(r, input.valueAsNumber);
+    input.value = String(usesLeft(r)); // show the clamped value
+}
+
+/** After a night's rest: refill everything that comes back daily; charges and plain uses stay. */
+function newDay(): void {
+    const daily = (data.value.resources ?? []).filter(refillsDaily);
+    for (const r of daily) setUsesLeft(r, r.max);
+    flashResourceStatus(daily.length ? `Refilled ${daily.length} daily resource(s).` : "Nothing refills daily.");
+}
+
 const auraStatus = ref("");
 let auraStatusTimeout: ReturnType<typeof setTimeout> | undefined;
 
-/** The Core tab's button: (re)create any missing auras and fix radii, without a re-import. */
+/** The Token tab's button: (re)create any missing auras and fix radii, without a re-import. */
 function resyncAuras(): void {
     const id = currentLocalId.value;
     let text: string;
@@ -890,14 +1019,199 @@ function spellsByLevel(spells: PF1Character["spellcasting"][number]["spells"]) {
         }));
 }
 
+// --- Sheet tab: the paper-style front page ---------------------------------------------------------
+// The breakdowns are Hero Lab's own numbers (stored on import). What the Adjustments tab adds on top
+// is shown as the paper sheet's "temp" column: the adjusted total minus the imported one.
+
+const ABILITY_KEYS: readonly AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
+const ABILITY_NAMES: Record<AbilityKey, string> = {
+    str: "Strength",
+    dex: "Dexterity",
+    con: "Constitution",
+    int: "Intelligence",
+    wis: "Wisdom",
+    cha: "Charisma",
+};
+
 const abilityRows = computed(() =>
-    (["str", "dex", "con", "int", "wis", "cha"] as const).map((key) => ({
-        key,
-        label: key.toUpperCase(),
-        score: view.value.abilities[key],
-        mod: abilityModifier(view.value.abilities[key]),
-    })),
+    ABILITY_KEYS.map((key) => {
+        const score = data.value.abilities[key];
+        const adjusted = view.value.abilities[key];
+        return {
+            key,
+            label: key.toUpperCase(),
+            name: ABILITY_NAMES[key],
+            score,
+            base: data.value.abilityBase?.[key] ?? score,
+            mod: abilityModifier(score),
+            /** Adjustments' change to the score, and the modifier it gives; undefined when unadjusted. */
+            tempScore: adjusted !== score ? adjusted - score : undefined,
+            tempMod: adjusted !== score ? abilityModifier(adjusted) : undefined,
+        };
+    }),
 );
+
+/** The class line under the name: "Oracle (Dual-Cursed Oracle) 4 / Paladin (Hospitaler) 3 / Hierophant 1". */
+const classLine = computed(() => {
+    const parts = data.value.classes.map((c) => `${c.name} ${c.level}`);
+    if (data.value.mythic) parts.push(`${data.value.mythic.path} ${data.value.mythic.tier} (mythic)`);
+    return parts.join(" / ");
+});
+
+const temp = (adjusted: number, imported: number): number | undefined =>
+    adjusted !== imported ? adjusted - imported : undefined;
+
+const acRow = computed(() => {
+    const p = data.value.combat.acParts;
+    const parts = p
+        ? [
+              { cap: "Armor", value: p.armor },
+              { cap: "Shield", value: p.shield },
+              { cap: "Dex", value: p.dex },
+              { cap: "Size", value: p.size },
+              { cap: "Natural", value: p.natural },
+              { cap: "Deflect", value: p.deflect },
+              { cap: "Dodge", value: p.dodge },
+              { cap: "Misc", value: p.misc },
+          ]
+        : undefined;
+    return { parts, temp: temp(view.value.combat.ac.normal, data.value.combat.ac.normal) };
+});
+
+const SAVE_ROWS = [
+    { key: "fort", label: "Fortitude", ability: "Constitution", roll: "Fortitude" },
+    { key: "ref", label: "Reflex", ability: "Dexterity", roll: "Reflex" },
+    { key: "will", label: "Will", ability: "Wisdom", roll: "Will" },
+] as const;
+
+const saveRows = computed(() =>
+    SAVE_ROWS.map((r) => {
+        const s = data.value.combat.saves[r.key];
+        return {
+            ...r,
+            total: view.value.combat.saves[r.key].total,
+            field: sheetNames.value[r.key],
+            parts:
+                s.ability === undefined
+                    ? undefined
+                    : [
+                          { cap: "Base", value: s.base },
+                          { cap: "Ability", value: s.ability },
+                          { cap: "Magic", value: s.resist ?? 0 },
+                          { cap: "Misc", value: s.misc ?? 0 },
+                      ],
+            temp: temp(view.value.combat.saves[r.key].total, s.total),
+        };
+    }),
+);
+
+/** CMB = BAB + Str + size/misc; CMD = 10 + BAB + Str + Dex + size/misc (from the imported numbers). */
+const maneuverRows = computed(() => {
+    const c = data.value.combat;
+    const str = abilityModifier(data.value.abilities.str);
+    const dex = abilityModifier(data.value.abilities.dex);
+    return {
+        cmb: [
+            { cap: "BAB", value: c.bab },
+            { cap: "Str", value: str },
+            { cap: "Size/misc", value: c.cmb - c.bab - str },
+        ],
+        cmbTemp: temp(view.value.combat.cmb, c.cmb),
+        cmd: [
+            { cap: "BAB", value: c.bab },
+            { cap: "Str", value: str },
+            { cap: "Dex", value: dex },
+            { cap: "Size/misc", value: c.cmd - 10 - c.bab - str - dex },
+        ],
+        cmdTemp: temp(view.value.combat.cmd, c.cmd),
+    };
+});
+
+const initiativeRow = computed(() => {
+    const p = data.value.combat.initiativeParts;
+    return {
+        parts: p
+            ? [
+                  { cap: "Dex", value: p.ability },
+                  { cap: "Misc", value: p.misc },
+              ]
+            : undefined,
+        temp: temp(view.value.combat.initiative, data.value.combat.initiative),
+    };
+});
+
+/** A skill's paper row: total = ability + ranks + misc (misc includes class skill +3 and armor check). */
+const skillRows = computed(() =>
+    view.value.skills.map((skill, i) => {
+        const imported = data.value.skills[i];
+        const abilityMod = imported?.abilityMod ?? abilityModifier(data.value.abilities[skill.ability]);
+        const ranks = skill.ranks;
+        return {
+            skill,
+            i,
+            abilityMod,
+            ranks,
+            misc: (imported?.total ?? skill.total) - abilityMod - ranks,
+            temp: imported ? temp(skill.total, imported.total) : undefined,
+        };
+    }),
+);
+
+/** A skill's hover text, like Hero Lab Classic's: the total and its parts, then the rules text. */
+function skillTooltip(row: (typeof skillRows.value)[number]): string {
+    const s = row.skill;
+    const parts = [`ability ${fmt(row.abilityMod)}`, `ranks ${row.ranks}`, `misc ${fmt(row.misc)}`];
+    if (row.temp !== undefined) parts.push(`temp ${fmt(row.temp)}`);
+    const flags = [
+        s.classSkill ? "Class skill." : "",
+        s.trainedOnly ? "Trained only." : "",
+        s.armorCheck ? "Armor check penalty applies." : "",
+    ].filter(Boolean);
+    return [
+        `${s.name} (${s.ability.toUpperCase()}) ${fmt(s.total)} = ${parts.join(", ")}`,
+        flags.join(" "),
+        s.situational ? `Situational: ${s.situational}` : "",
+        s.description ? `\n${s.description}` : "",
+    ]
+        .filter(Boolean)
+        .join("\n");
+}
+
+/** A feat's hover text: name and categories, then the full rules text. */
+function featTooltip(feat: FeatEntry): string {
+    const head = feat.category ? `${feat.name} [${feat.category}]` : feat.name;
+    const body = feat.fullText || feat.description;
+    return body ? `${head}\n\n${body}` : head;
+}
+
+/** A special's hover text: name, Hero Lab's type and source, its uses if limited, then the rules text. */
+function specialTooltip(sp: SpecialEntry): string {
+    const resource = resourceForSpecial(sp);
+    const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
+        Boolean,
+    );
+    const head = [sp.name, meta.join(" · ")].filter(Boolean).join("\n");
+    const body = sp.fullText || sp.description;
+    return body ? `${head}\n\n${body}` : head;
+}
+
+const shownSkillRows = computed(() => {
+    const hidden = new Set(data.value.sheetConfig?.hiddenSkills ?? []);
+    return skillRows.value.filter((r) => !hidden.has(r.skill.name));
+});
+
+const gearMoney = computed(() => {
+    const m = data.value.currency;
+    return [
+        ["pp", m.pp],
+        ["gp", m.gp],
+        ["sp", m.sp],
+        ["cp", m.cp],
+    ]
+        .filter(([, v]) => typeof v === "number" && v > 0)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(", ");
+});
 
 function fmt(n: number): string {
     return n >= 0 ? `+${n}` : `${n}`;
@@ -908,7 +1222,7 @@ function fmt(n: number): string {
     <div id="pf1e-sheet" :style="widthStyle">
         <div v-if="availableUpdate" class="update-banner">
             PF1e sheet {{ availableUpdate }} is available (you have {{ modVersion }}).
-            <a :href="REPO_URL" target="_blank" rel="noopener noreferrer">Get it on GitHub</a>
+            <a :href="RELEASES_URL" target="_blank" rel="noopener noreferrer">Download it from GitHub Releases</a>
             <button type="button" title="Hide until the next version" @click="dismissUpdate">✕</button>
         </div>
         <div class="pf1e-header">
@@ -977,74 +1291,514 @@ function fmt(n: number): string {
             </span>
         </div>
 
-        <div v-if="activeTab === 'Core'" class="pf1e-panel">
-            <div class="grid-3">
-                <label
-                    >Race<span class="val">{{ data.identity.race }}</span></label
-                >
-                <label
-                    >Alignment<span class="val">{{ data.identity.alignment }}</span></label
-                >
-                <label
-                    >Deity<span class="val">{{ data.identity.deity }}</span></label
-                >
-                <label
-                    >Size<span class="val">{{ data.identity.size }}</span></label
-                >
-                <label
-                    >Gender<span class="val">{{ data.identity.gender }}</span></label
-                >
-                <label
-                    >Gold
-                    <span class="val">{{ data.currency.gp }}</span>
-                </label>
-            </div>
-
-            <h4>Classes</h4>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Class</th>
-                            <th>Level</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(cls, i) of data.classes" :key="i">
-                            <td>
-                                <span class="val">{{ cls.name }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ cls.level }}</span>
-                            </td>
-                        </tr>
-                        <tr v-if="data.mythic">
-                            <td>
-                                <span class="val">{{ data.mythic.path }}</span> (mythic path)
-                            </td>
-                            <td>
-                                <span class="val">Tier {{ data.mythic.tier }}</span>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <h4>Ability Scores</h4>
-            <div class="abilities">
-                <div v-for="row of abilityRows" :key="row.key" class="ability">
-                    <div class="label">{{ row.label }}</div>
-                    <div class="score">{{ view.abilities[row.key] }}</div>
-                    <div class="mod">{{ fmt(row.mod) }}</div>
-                    <button
-                        type="button"
-                        class="ability-roll"
-                        :disabled="rolling"
-                        @click="rollMod(row.label + ' check', sheetNames.abilityMod[row.key])"
-                    >
-                        Roll
-                    </button>
+        <div v-if="activeTab === 'Sheet'" class="pf1e-panel paper">
+            <div class="id-grid">
+                <div class="id-field wide">
+                    <span class="id-val">{{ classLine || "-" }}</span>
+                    <span class="cap">Character level (class)</span>
                 </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.race || "-" }}</span>
+                    <span class="cap">Race</span>
+                </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.size }}</span>
+                    <span class="cap">Size</span>
+                </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.gender || "-" }}</span>
+                    <span class="cap">Gender</span>
+                </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.age || "-" }}</span>
+                    <span class="cap">Age</span>
+                </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.alignment || "-" }}</span>
+                    <span class="cap">Alignment</span>
+                </div>
+                <div class="id-field">
+                    <span class="id-val">{{ data.identity.deity || "-" }}</span>
+                    <span class="cap">Deity</span>
+                </div>
+            </div>
+            <div class="paper-hint">
+                Click a highlighted total to roll it. The <strong>M</strong> boxes put a roll in PlanarAlly's dice
+                macros.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
+
+            <div class="paper-grid">
+                <section class="block" v-if="!isHidden('hiddenSections', 'abilities')">
+                    <div class="bar">Abilities</div>
+                    <div class="ability-head">
+                        <span></span>
+                        <span class="cap">Score</span>
+                        <span class="cap">Mod</span>
+                        <span class="cap">Temp adj</span>
+                        <span class="cap">Temp mod</span>
+                    </div>
+                    <div v-for="row of abilityRows" :key="row.key" class="ability-line">
+                        <span class="tag"
+                            >{{ row.label }}<small>{{ row.name }}</small></span
+                        >
+                        <span class="box" :title="row.base !== row.score ? `Base ${row.base}` : undefined">{{
+                            row.score
+                        }}</span>
+                        <button
+                            v-if="row.tempMod === undefined"
+                            type="button"
+                            class="box total"
+                            :disabled="rolling"
+                            :title="`Roll a ${row.name} check`"
+                            @click="rollMod(row.label + ' check', sheetNames.abilityMod[row.key])"
+                        >
+                            {{ fmt(row.mod) }}
+                        </button>
+                        <span v-else class="box">{{ fmt(row.mod) }}</span>
+                        <span class="box">{{ row.tempScore === undefined ? "" : fmt(row.tempScore) }}</span>
+                        <button
+                            v-if="row.tempMod !== undefined"
+                            type="button"
+                            class="box total"
+                            :disabled="rolling"
+                            :title="`Roll a ${row.name} check`"
+                            @click="rollMod(row.label + ' check', sheetNames.abilityMod[row.key])"
+                        >
+                            {{ fmt(row.tempMod) }}
+                        </button>
+                        <span v-else class="box"></span>
+                    </div>
+                </section>
+
+                <section class="block" v-if="!isHidden('hiddenSections', 'hp')">
+                    <div class="stat-line">
+                        <span class="tag">HP<small>Hit points</small></span>
+                        <span class="cell">
+                            <span class="box">{{ view.combat.hp.max }}</span>
+                            <span class="cap">Total</span>
+                        </span>
+                        <span class="cell">
+                            <input
+                                v-model.number="data.combat.hp.current"
+                                class="box hp-current"
+                                type="number"
+                                title="Current HP - kept in step with the token's HP tracker"
+                                @change="onHpCommitted"
+                            />
+                            <span class="cap">Current</span>
+                        </span>
+                        <span class="cell">
+                            <span class="box">{{ view.combat.hp.nonlethal || "" }}</span>
+                            <span class="cap">Nonlethal</span>
+                        </span>
+                    </div>
+                    <div v-if="data.identity.hitDice" class="small-note">{{ data.identity.hitDice }}</div>
+
+                    <div class="stat-line">
+                        <span class="tag">Init<small>Initiative</small></span>
+                        <span class="cell">
+                            <button
+                                type="button"
+                                class="box total"
+                                :disabled="rolling"
+                                title="Roll initiative"
+                                @click="rollMod('Initiative', sheetNames.init)"
+                            >
+                                {{ fmt(view.combat.initiative) }}
+                            </button>
+                            <span class="cap">Total</span>
+                        </span>
+                        <template v-if="initiativeRow.parts">
+                            <span class="op">=</span>
+                            <template v-for="(p, n) of initiativeRow.parts" :key="p.cap">
+                                <span v-if="n" class="op">+</span>
+                                <span class="cell">
+                                    <span class="box">{{ fmt(p.value) }}</span>
+                                    <span class="cap">{{ p.cap }}</span>
+                                </span>
+                            </template>
+                        </template>
+                        <template v-if="initiativeRow.temp !== undefined">
+                            <span class="op">+</span>
+                            <span class="cell">
+                                <span class="box temp">{{ fmt(initiativeRow.temp) }}</span>
+                                <span class="cap">Temp</span>
+                            </span>
+                        </template>
+                        <label class="macro-box" title="Roll Initiative in PlanarAlly's dice macros">
+                            <input
+                                type="checkbox"
+                                :checked="isRollMacro('Initiative')"
+                                @change="toggleRollMacro('Initiative', ($event.target as HTMLInputElement).checked)"
+                            />M
+                        </label>
+                    </div>
+
+                    <div class="stat-line">
+                        <span class="tag">Speed<small>Land</small></span>
+                        <span class="cell">
+                            <span class="box">{{ view.combat.speed }}</span>
+                            <span class="cap">{{ data.combat.armorCheckPenalty ? "With armor" : "Feet" }}</span>
+                        </span>
+                        <span v-if="data.combat.baseSpeed && data.combat.baseSpeed !== data.combat.speed" class="cell">
+                            <span class="box">{{ data.combat.baseSpeed }}</span>
+                            <span class="cap">Base speed</span>
+                        </span>
+                    </div>
+                    <div v-if="data.combat.armorCheckPenalty || data.combat.maxDex" class="small-note">
+                        <span v-if="data.combat.armorCheckPenalty"
+                            >Armor check penalty {{ data.combat.armorCheckPenalty }}</span
+                        >
+                        <span v-if="data.combat.maxDex"> · Max Dex {{ fmt(data.combat.maxDex) }}</span>
+                    </div>
+                </section>
+
+                <section class="block full" v-if="!isHidden('hiddenSections', 'ac')">
+                    <div class="stat-line">
+                        <span class="tag">AC<small>Armor class</small></span>
+                        <span class="cell">
+                            <span class="box total">{{ view.combat.ac.normal }}</span>
+                            <span class="cap">Total</span>
+                        </span>
+                        <template v-if="acRow.parts">
+                            <span class="op">= 10 +</span>
+                            <template v-for="(p, n) of acRow.parts" :key="p.cap">
+                                <span v-if="n" class="op">+</span>
+                                <span class="cell">
+                                    <span class="box">{{ p.value ? fmt(p.value) : "" }}</span>
+                                    <span class="cap">{{ p.cap }}</span>
+                                </span>
+                            </template>
+                        </template>
+                        <template v-if="acRow.temp !== undefined">
+                            <span class="op">+</span>
+                            <span class="cell">
+                                <span class="box temp">{{ fmt(acRow.temp) }}</span>
+                                <span class="cap">Temp</span>
+                            </span>
+                        </template>
+                    </div>
+                    <div class="stat-line">
+                        <span class="tag">Touch</span>
+                        <span class="box total">{{ view.combat.ac.touch }}</span>
+                        <span class="tag">Flat-<br />footed</span>
+                        <span class="box total">{{ view.combat.ac.flatFooted }}</span>
+                    </div>
+                </section>
+
+                <section class="block full" v-if="!isHidden('hiddenSections', 'saves')">
+                    <div class="bar">Saving throws</div>
+                    <div v-for="row of saveRows" :key="row.key" class="stat-line">
+                        <span class="tag wide"
+                            >{{ row.label }}<small>{{ row.ability }}</small></span
+                        >
+                        <span class="cell">
+                            <button
+                                type="button"
+                                class="box total"
+                                :disabled="rolling"
+                                :title="`Roll a ${row.label} save`"
+                                @click="rollMod(`${row.label} save`, row.field)"
+                            >
+                                {{ fmt(row.total) }}
+                            </button>
+                            <span class="cap">Total</span>
+                        </span>
+                        <template v-if="row.parts">
+                            <span class="op">=</span>
+                            <template v-for="(p, n) of row.parts" :key="p.cap">
+                                <span v-if="n" class="op">+</span>
+                                <span class="cell">
+                                    <span class="box">{{ fmt(p.value) }}</span>
+                                    <span class="cap">{{ p.cap }}</span>
+                                </span>
+                            </template>
+                        </template>
+                        <template v-if="row.temp !== undefined">
+                            <span class="op">+</span>
+                            <span class="cell">
+                                <span class="box temp">{{ fmt(row.temp) }}</span>
+                                <span class="cap">Temp</span>
+                            </span>
+                        </template>
+                        <label class="macro-box" :title="`Roll ${row.roll} in PlanarAlly's dice macros`">
+                            <input
+                                type="checkbox"
+                                :checked="isRollMacro(row.roll)"
+                                @change="toggleRollMacro(row.roll, ($event.target as HTMLInputElement).checked)"
+                            />M
+                        </label>
+                    </div>
+                    <div v-if="data.combat.saveNotes" class="small-note">
+                        <strong>Situational:</strong> {{ data.combat.saveNotes }}
+                    </div>
+                </section>
+
+                <section class="block full" v-if="!isHidden('hiddenSections', 'attack')">
+                    <div class="stat-line">
+                        <span class="tag wide">Base attack<small>bonus</small></span>
+                        <span class="box">{{ fmt(view.combat.bab) }}</span>
+                        <span v-if="data.combat.meleeAttack" class="small-note inline">
+                            Melee {{ data.combat.meleeAttack }}
+                        </span>
+                        <span v-if="data.combat.rangedAttack" class="small-note inline">
+                            Ranged {{ data.combat.rangedAttack }}
+                        </span>
+                    </div>
+                    <div class="stat-line">
+                        <span class="tag">CMB</span>
+                        <span class="cell">
+                            <button
+                                type="button"
+                                class="box total"
+                                :disabled="rolling"
+                                title="Roll a combat maneuver"
+                                @click="rollMod('CMB', sheetNames.cmb)"
+                            >
+                                {{ fmt(view.combat.cmb) }}
+                            </button>
+                            <span class="cap">Total</span>
+                        </span>
+                        <span class="op">=</span>
+                        <template v-for="(p, n) of maneuverRows.cmb" :key="p.cap">
+                            <span v-if="n" class="op">+</span>
+                            <span class="cell">
+                                <span class="box">{{ fmt(p.value) }}</span>
+                                <span class="cap">{{ p.cap }}</span>
+                            </span>
+                        </template>
+                        <template v-if="maneuverRows.cmbTemp !== undefined">
+                            <span class="op">+</span>
+                            <span class="cell">
+                                <span class="box temp">{{ fmt(maneuverRows.cmbTemp) }}</span>
+                                <span class="cap">Temp</span>
+                            </span>
+                        </template>
+                    </div>
+                    <div class="stat-line">
+                        <span class="tag">CMD</span>
+                        <span class="cell">
+                            <span class="box total">{{ view.combat.cmd }}</span>
+                            <span class="cap">Total</span>
+                        </span>
+                        <span class="op">= 10 +</span>
+                        <template v-for="(p, n) of maneuverRows.cmd" :key="p.cap">
+                            <span v-if="n" class="op">+</span>
+                            <span class="cell">
+                                <span class="box">{{ fmt(p.value) }}</span>
+                                <span class="cap">{{ p.cap }}</span>
+                            </span>
+                        </template>
+                        <template v-if="maneuverRows.cmdTemp !== undefined">
+                            <span class="op">+</span>
+                            <span class="cell">
+                                <span class="box temp">{{ fmt(maneuverRows.cmdTemp) }}</span>
+                                <span class="cap">Temp</span>
+                            </span>
+                        </template>
+                        <span
+                            v-if="data.combat.cmdFlatFooted && data.combat.cmdFlatFooted !== data.combat.cmd"
+                            class="cell"
+                        >
+                            <span class="box">{{ data.combat.cmdFlatFooted }}</span>
+                            <span class="cap">Flat-footed</span>
+                        </span>
+                    </div>
+                </section>
+
+                <template v-for="(atk, i) of view.combat.attacks" :key="`atk-${i}`">
+                    <section
+                        v-if="!isHidden('hiddenSections', 'weapons') && !isHidden('hiddenWeapons', atk.name)"
+                        class="block weapon"
+                    >
+                        <div class="bar">
+                            Weapon
+                            <label
+                                class="macro-box on-bar"
+                                :title="`${atk.name}'s attack and damage in PlanarAlly's dice macros`"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :checked="isMacroAttack(atk.name)"
+                                    @change="toggleMacroAttack(atk.name, ($event.target as HTMLInputElement).checked)"
+                                />M
+                            </label>
+                        </div>
+                        <table class="weapon-table">
+                            <tr class="caps">
+                                <td class="w-name"></td>
+                                <td>Attack bonus</td>
+                                <td>Critical</td>
+                            </tr>
+                            <tr>
+                                <td class="w-name">{{ atk.name }}</td>
+                                <td class="w-attack">
+                                    <span v-if="!sheetNames.attacks[i]?.atk">{{ atk.bonus }}</span>
+                                    <button
+                                        v-for="(_, n) of sheetNames.attacks[i]?.atk
+                                            ? sheetNames.attacks[i]!.offsets
+                                            : []"
+                                        :key="n"
+                                        type="button"
+                                        class="box total"
+                                        :disabled="rolling"
+                                        :title="`Roll ${ordinal(n + 1)} attack`"
+                                        @click="rollAttack(i, n)"
+                                    >
+                                        {{ attackBonusLabel(i, n) }}
+                                    </button>
+                                </td>
+                                <td>{{ atk.critical }}</td>
+                            </tr>
+                            <tr class="caps">
+                                <td>Type</td>
+                                <td>Range</td>
+                                <td>Damage</td>
+                            </tr>
+                            <tr>
+                                <td>{{ atk.damageType }}</td>
+                                <td>{{ atk.range || "" }}</td>
+                                <td>
+                                    <button
+                                        v-if="sheetNames.attacks[i]?.damage"
+                                        type="button"
+                                        class="box total dmg"
+                                        :disabled="rolling"
+                                        title="Roll damage"
+                                        @click="rollDamage(i)"
+                                    >
+                                        {{ atk.damage }}
+                                    </button>
+                                    <span v-else>{{ atk.damage }}</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </section>
+                </template>
+
+                <section v-if="!isHidden('hiddenSections', 'skills')" class="block full">
+                    <div class="bar">Skills</div>
+                    <div class="table-wrap">
+                        <table class="paper-table skills-table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Skill name</th>
+                                    <th class="num">Total</th>
+                                    <th class="num" title="Ability modifier">Abil</th>
+                                    <th class="num">Ranks</th>
+                                    <th class="num">Misc</th>
+                                    <th v-if="shownSkillRows.some((r) => r.temp !== undefined)" class="num">Temp</th>
+                                    <th title="Put Roll <skill> in PlanarAlly's dice macros">M</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row of shownSkillRows" :key="row.i">
+                                    <td class="flags">
+                                        <span v-if="row.skill.classSkill" title="Class skill">✓</span>
+                                    </td>
+                                    <td class="skill-name" :title="skillTooltip(row)">
+                                        {{ row.skill.name }}
+                                        <span v-if="row.skill.situational" class="flag" title="Situational modifier"
+                                            >*</span
+                                        >
+                                        <span class="skill-ability">{{ row.skill.ability.toUpperCase() }}</span>
+                                        <span v-if="row.skill.trainedOnly" class="flag" title="Trained only">T</span>
+                                        <span
+                                            v-if="row.skill.armorCheck"
+                                            class="flag"
+                                            title="Armor check penalty applies"
+                                            >A</span
+                                        >
+                                    </td>
+                                    <td class="num">
+                                        <button
+                                            type="button"
+                                            class="box total"
+                                            :disabled="rolling"
+                                            :title="`Roll ${row.skill.name}`"
+                                            @click="rollMod(row.skill.name, sheetNames.skills[row.i])"
+                                        >
+                                            {{ fmt(row.skill.total) }}
+                                        </button>
+                                    </td>
+                                    <td class="num">{{ fmt(row.abilityMod) }}</td>
+                                    <td class="num">{{ row.ranks || "" }}</td>
+                                    <td class="num">{{ row.misc ? fmt(row.misc) : "" }}</td>
+                                    <td v-if="shownSkillRows.some((r) => r.temp !== undefined)" class="num temp-inline">
+                                        {{ row.temp === undefined ? "" : fmt(row.temp) }}
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="checkbox"
+                                            :checked="isMacroSkill(row.skill.name)"
+                                            :title="`Show Roll ${row.skill.name} in PlanarAlly's dice macros`"
+                                            @change="
+                                                toggleMacroSkill(
+                                                    row.skill.name,
+                                                    ($event.target as HTMLInputElement).checked,
+                                                )
+                                            "
+                                        />
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="small-note">
+                        Hover a skill for its rules text. ✓ class skill · T trained only · A armor check penalty applies
+                        · * situational modifier · misc includes the class-skill +3 and armor check penalty
+                    </div>
+                </section>
+
+                <section
+                    v-if="(data.combat.maneuvers ?? []).length && !isHidden('hiddenSections', 'maneuvers')"
+                    class="block"
+                >
+                    <div class="bar">Combat maneuvers</div>
+                    <table class="paper-table">
+                        <thead>
+                            <tr>
+                                <th>Maneuver</th>
+                                <th class="num">CMB</th>
+                                <th class="num">CMD</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="m of data.combat.maneuvers ?? []" :key="m.name">
+                                <td>{{ m.name }}</td>
+                                <td class="num">{{ fmt(m.cmb) }}</td>
+                                <td class="num">{{ m.cmd }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="block">
+                    <template v-if="(data.identity.languages ?? []).length && !isHidden('hiddenSections', 'languages')">
+                        <div class="bar">Languages</div>
+                        <div class="block-text">{{ (data.identity.languages ?? []).join(" • ") }}</div>
+                    </template>
+                    <template v-if="!isHidden('hiddenSections', 'money')">
+                        <div class="bar">Money &amp; experience</div>
+                        <div class="block-text">
+                            <div>{{ gearMoney || "0 gp" }}</div>
+                            <div v-if="data.xp">XP {{ data.xp.toLocaleString() }}</div>
+                        </div>
+                    </template>
+                </section>
+            </div>
+        </div>
+
+        <div v-else-if="activeTab === 'Token'" class="pf1e-panel">
+            <h4>HP tracker</h4>
+            <div class="readonly-note">
+                Current HP on the Sheet tab and the token's tracker named "HP" are kept in step both ways.
+            </div>
+            <div class="hp-push-row">
+                <button type="button" @click="manualPushHp">Push HP to tracker</button>
+                <span v-if="pushStatus" class="hp-push-status">{{ pushStatus }}</span>
             </div>
 
             <h4>Auras (from the Hero Lab specials)</h4>
@@ -1076,255 +1830,18 @@ function fmt(n: number): string {
                 <span v-if="auraStatus" class="hp-push-status">{{ auraStatus }}</span>
             </div>
 
-            <h4>Trackers (limited uses, charges, spell slots)</h4>
-            <div v-if="(data.resources ?? []).length" class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tracker</th>
-                            <th>Uses</th>
-                            <th>On token</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="res of data.resources ?? []" :key="res.key">
-                            <td>{{ res.name }}</td>
-                            <td>{{ resourceLabel(res) }}</td>
-                            <td>{{ !isTracked(res) ? "off" : res.uuid ? "yes" : "no" }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div v-else class="readonly-note">
-                No limited-use abilities, charged items or spell slots in the Hero Lab export.
-            </div>
-            <div class="hp-push-row">
-                <button type="button" @click="resyncResources">Create / update trackers on the token</button>
-                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
-            </div>
-
             <h4>Custom Data (for PlanarAlly's dice panel)</h4>
             <div class="readonly-note">
                 Every import writes the sheet's numbers and roll macros into this token's Custom Data (source
-                "pf1e-sheet"). The macros - initiative, saves, attacks, damage and the skills ticked on the Skills tab -
-                appear on PlanarAlly's dice prompt. You can also type formulas like 1d20 + {Spellcraft} or 1d20 + {STR
-                mod} there. The roll buttons on this sheet use these same fields, so a value changed there (a buff, a
-                penalty) changes every roll that uses it.
+                "pf1e-sheet"). The macros - initiative, saves, attacks, damage and the skills and spells ticked
+                <strong>M</strong> - appear on PlanarAlly's dice prompt. You can also type formulas like 1d20 +
+                {Spellcraft} or 1d20 + {STR mod} there. The roll buttons on this sheet use these same fields, so a value
+                changed there (a buff, a penalty) changes every roll that uses it.
             </div>
             <div class="hp-push-row">
                 <button type="button" @click="exportCustomData">Export to Custom Data</button>
                 <button type="button" @click="clearCustomData">Remove sheet data from Custom Data</button>
                 <span v-if="cdStatus" class="hp-push-status">{{ cdStatus }}</span>
-            </div>
-        </div>
-
-        <div v-else-if="activeTab === 'Combat'" class="pf1e-panel">
-            <div class="hp-push-row">
-                <button type="button" @click="manualPushHp">Push HP to tracker</button>
-                <span v-if="pushStatus" class="hp-push-status">{{ pushStatus }}</span>
-            </div>
-            <div class="roll-row">
-                <button type="button" :disabled="rolling" @click="rollMod('Initiative', sheetNames.init)">
-                    Roll initiative
-                </button>
-                <button type="button" :disabled="rolling" @click="rollMod('Fortitude save', sheetNames.fort)">
-                    Fort
-                </button>
-                <button type="button" :disabled="rolling" @click="rollMod('Reflex save', sheetNames.ref)">
-                    Reflex
-                </button>
-                <button type="button" :disabled="rolling" @click="rollMod('Will save', sheetNames.will)">Will</button>
-                <button type="button" :disabled="rolling" @click="rollMod('CMB', sheetNames.cmb)">CMB</button>
-            </div>
-            <div class="grid-3">
-                <label
-                    >HP
-                    <input
-                        v-model.number="data.combat.hp.current"
-                        class="hp-current"
-                        type="number"
-                        @change="onHpCommitted"
-                    />
-                    /
-                    <span class="val">{{ view.combat.hp.max }}</span>
-                </label>
-                <label
-                    >Nonlethal
-                    <span class="val">{{ view.combat.hp.nonlethal }}</span>
-                </label>
-                <label
-                    >Speed
-                    <span class="val">{{ view.combat.speed }}</span>
-                </label>
-                <label
-                    >AC
-                    <span class="val">{{ view.combat.ac.normal }}</span>
-                </label>
-                <label
-                    >Touch
-                    <span class="val">{{ view.combat.ac.touch }}</span>
-                </label>
-                <label
-                    >Flat-Footed
-                    <span class="val">{{ view.combat.ac.flatFooted }}</span>
-                </label>
-                <label
-                    >BAB
-                    <span class="val">{{ view.combat.bab }}</span>
-                </label>
-                <label
-                    >CMB
-                    <span class="val">{{ view.combat.cmb }}</span>
-                </label>
-                <label
-                    >CMD
-                    <span class="val">{{ view.combat.cmd }}</span>
-                </label>
-                <label
-                    >Initiative
-                    <span class="val">{{ view.combat.initiative }}</span>
-                </label>
-            </div>
-
-            <h4>Saves</h4>
-            <div class="grid-3">
-                <label
-                    >Fort
-                    <span class="val">{{ view.combat.saves.fort.total }}</span>
-                </label>
-                <label
-                    >Reflex
-                    <span class="val">{{ view.combat.saves.ref.total }}</span>
-                </label>
-                <label
-                    >Will
-                    <span class="val">{{ view.combat.saves.will.total }}</span>
-                </label>
-            </div>
-
-            <h4>Attacks</h4>
-            <div class="readonly-note">
-                Untick <strong>Macro</strong> to leave a weapon's attack and damage rolls out of PlanarAlly's dice
-                macros; its buttons here still work.
-                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Bonus</th>
-                            <th>Damage</th>
-                            <th>Crit</th>
-                            <th>Type</th>
-                            <th>Roll</th>
-                            <th>Macro</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(atk, i) of view.combat.attacks" :key="i">
-                            <td>
-                                <span class="val">{{ atk.name }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ atk.bonus }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ atk.damage }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ atk.critical }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ atk.damageType }}</span>
-                            </td>
-                            <td class="roll-cell">
-                                <button v-if="!sheetNames.attacks[i]?.atk" type="button" disabled>Atk</button>
-                                <button
-                                    v-for="(_, n) of sheetNames.attacks[i]?.atk ? sheetNames.attacks[i]!.offsets : []"
-                                    :key="n"
-                                    type="button"
-                                    :disabled="rolling"
-                                    :title="`Roll ${ordinal(n + 1)} attack`"
-                                    @click="rollAttack(i, n)"
-                                >
-                                    {{ attackBonusLabel(i, n) }}
-                                </button>
-                                <button
-                                    v-if="sheetNames.attacks[i]?.damage"
-                                    type="button"
-                                    :disabled="rolling"
-                                    @click="rollDamage(i)"
-                                >
-                                    Dmg
-                                </button>
-                            </td>
-                            <td>
-                                <input
-                                    type="checkbox"
-                                    :checked="isMacroAttack(atk.name)"
-                                    :title="`Show ${atk.name}'s attack and damage rolls in PlanarAlly's dice macros`"
-                                    @change="toggleMacroAttack(atk.name, ($event.target as HTMLInputElement).checked)"
-                                />
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div v-else-if="activeTab === 'Skills'" class="pf1e-panel">
-            <div class="readonly-note">
-                Tick <strong>Macro</strong> to add a skill to PlanarAlly's dice macros for this token. Initiative and
-                saves are always there; attacks are chosen on the Combat tab.
-                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Skill</th>
-                            <th>Ability</th>
-                            <th>Ranks</th>
-                            <th>Class</th>
-                            <th>Total</th>
-                            <th>Roll</th>
-                            <th>Macro</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(skill, i) of view.skills" :key="i">
-                            <td>{{ skill.name }}</td>
-                            <td>{{ skill.ability.toUpperCase() }}</td>
-                            <td>
-                                <span class="val">{{ skill.ranks }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ skill.classSkill ? "✓" : "" }}</span>
-                            </td>
-                            <td>
-                                <span class="val">{{ skill.total }}</span>
-                            </td>
-                            <td class="roll-cell">
-                                <button
-                                    type="button"
-                                    :disabled="rolling"
-                                    @click="rollMod(skill.name, sheetNames.skills[i])"
-                                >
-                                    Roll
-                                </button>
-                            </td>
-                            <td>
-                                <input
-                                    type="checkbox"
-                                    :checked="isMacroSkill(skill.name)"
-                                    :title="`Show Roll ${skill.name} in PlanarAlly's dice macros`"
-                                    @change="toggleMacroSkill(skill.name, ($event.target as HTMLInputElement).checked)"
-                                />
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
             </div>
         </div>
 
@@ -1385,9 +1902,10 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
             <ul class="feat-list">
-                <li v-for="(feat, i) of data.feats" :key="i">
+                <li v-for="(feat, i) of data.feats" :key="i" class="hover-info" :title="featTooltip(feat)">
                     <strong>{{ feat.name }}</strong>
-                    <span v-if="feat.fullText" class="info-icon" :title="feat.fullText" aria-label="Full text">ⓘ</span>
+                    <span v-if="feat.category" class="special-source">{{ feat.category }}</span>
+                    <span v-if="feat.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
@@ -1463,20 +1981,88 @@ function fmt(n: number): string {
             </div>
         </div>
 
+        <div v-else-if="activeTab === 'Resources'" class="pf1e-panel">
+            <div class="readonly-note">
+                Uses left are kept on the sheet for every resource. Tick <strong>Track</strong> to also put a resource
+                on the token as a tracker; the two then stay in step both ways. Nothing refills on its own:
+                <strong>New day</strong> refills the daily ones (x/day, rounds/day, spell slots) but not charges.
+                <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
+            </div>
+            <h4>Tracked resources</h4>
+            <div class="hp-push-row">
+                <button type="button" @click="newDay">New day</button>
+                <button type="button" @click="resyncResources">Create / update trackers on the token</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Resource</th>
+                            <th>Uses</th>
+                            <th>Left</th>
+                            <th>Track</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="res of data.resources ?? []" :key="res.key">
+                            <td>{{ res.name }}</td>
+                            <td>{{ resourceLabel(res) }}</td>
+                            <td class="uses-left">
+                                <button
+                                    type="button"
+                                    :disabled="usesLeft(res) <= 0"
+                                    title="Use one"
+                                    @click="setUsesLeft(res, usesLeft(res) - 1)"
+                                >
+                                    −
+                                </button>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    :max="res.max"
+                                    :value="usesLeft(res)"
+                                    @change="onUsesInput(res, $event)"
+                                />
+                                <button
+                                    type="button"
+                                    :disabled="usesLeft(res) >= res.max"
+                                    title="Get one back"
+                                    @click="setUsesLeft(res, usesLeft(res) + 1)"
+                                >
+                                    +
+                                </button>
+                                / {{ res.max }}
+                            </td>
+                            <td>
+                                <label class="track-toggle" title="Keep a tracker on the token">
+                                    <input
+                                        type="checkbox"
+                                        :checked="isTracked(res)"
+                                        @change="toggleTracked(res, ($event.target as HTMLInputElement).checked)"
+                                    />
+                                    {{ !isTracked(res) ? "" : res.uuid ? "on token" : "missing" }}
+                                </label>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <div v-else-if="activeTab === 'Specials'" class="pf1e-panel">
             <div v-if="!(data.specials ?? []).length" class="readonly-note">
                 No specials found - import the character from Hero Lab to fill this in.
             </div>
             <div v-if="(data.resources ?? []).length" class="readonly-note">
-                Abilities with a <strong>Track</strong> box have a tracker on the token (uses per day, rounds or
-                charges). Untick one to remove its tracker; tick it to add it back. Trackers never refill on their own,
-                so reset daily ones yourself after a rest.
+                Tick <strong>Track</strong> on an ability to put a tracker for it on the token (uses per day, rounds or
+                charges); untick it to remove the tracker. The Resources tab counts uses either way and has a
+                <strong>New day</strong> button.
                 <span v-if="resourceStatus" class="hp-push-status">{{ resourceStatus }}</span>
             </div>
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
                 <h5>{{ group.category }}</h5>
                 <ul class="feat-list">
-                    <li v-for="sp of group.entries" :key="sp.name">
+                    <li v-for="sp of group.entries" :key="sp.name" class="hover-info" :title="specialTooltip(sp)">
                         <label v-if="resourceForSpecial(sp)" class="track-toggle" title="Keep a tracker on the token">
                             <input
                                 type="checkbox"
@@ -1489,7 +2075,7 @@ function fmt(n: number): string {
                         </label>
                         <strong>{{ sp.name }}</strong>
                         <span v-if="sp.source" class="special-source">{{ sp.source }}</span>
-                        <span v-if="sp.fullText" class="info-icon" :title="sp.fullText" aria-label="Full text">ⓘ</span>
+                        <span v-if="sp.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                         <div class="hint">{{ sp.description }}</div>
                     </li>
                 </ul>
@@ -1533,6 +2119,67 @@ function fmt(n: number): string {
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <div v-else-if="activeTab === 'Config'" class="pf1e-panel">
+            <div class="readonly-note">
+                Choose what this sheet shows; the choices are saved with the character and kept when you re-import. A
+                hidden weapon or skill is also left out of PlanarAlly's dice macros.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
+
+            <h4>Sheet sections</h4>
+            <div class="config-list">
+                <label v-for="[key, label] of SHEET_SECTIONS" :key="key">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenSections', key)"
+                        @change="setShown('hiddenSections', key, ($event.target as HTMLInputElement).checked, label)"
+                    />
+                    {{ label }}
+                </label>
+            </div>
+
+            <h4>Weapons</h4>
+            <div v-if="data.combat.attacks.length" class="config-list">
+                <label v-for="(atk, i) of data.combat.attacks" :key="i">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenWeapons', atk.name)"
+                        @change="setShown('hiddenWeapons', atk.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    {{ atk.name }} <span class="hint">{{ atk.bonus }} · {{ atk.damage }}</span>
+                </label>
+            </div>
+            <div v-else class="readonly-note">No weapons in the Hero Lab export.</div>
+
+            <h4>Skills</h4>
+            <div class="hp-push-row">
+                <button type="button" @click="hideSkillsWithoutRanks(true)">Hide skills without ranks</button>
+                <button type="button" @click="hideSkillsWithoutRanks(false)">Show all skills</button>
+            </div>
+            <div class="config-list columns">
+                <label v-for="skill of data.skills" :key="skill.name">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenSkills', skill.name)"
+                        @change="setShown('hiddenSkills', skill.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    {{ skill.name }}
+                </label>
+            </div>
+
+            <h4>Tabs</h4>
+            <div class="config-list">
+                <label v-for="tab of configTabs" :key="tab">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenTabs', tab)"
+                        @change="setShown('hiddenTabs', tab, ($event.target as HTMLInputElement).checked, `${tab} tab`)"
+                    />
+                    {{ tab }}
+                </label>
             </div>
         </div>
 
@@ -1586,6 +2233,10 @@ function fmt(n: number): string {
     background-color: white;
     font-size: 0.9rem;
     overflow-wrap: anywhere;
+    // Paper-sheet colours: ink for bars, labels and box borders; a light fill for the totals.
+    --pf1e-ink: #111;
+    --pf1e-total: #fff6c8;
+    --pf1e-total-hover: #ffe58a;
 
     *,
     *::before,
@@ -1613,9 +2264,325 @@ function fmt(n: number): string {
         width: 100%;
     }
 
-    h4 {
+    // Section headings are the paper sheet's black bars, on every tab.
+    h4,
+    .bar {
         display: block;
-        margin: 0.75rem 0 0.4rem;
+        margin: 0.75rem 0 0.35rem;
+        padding: 0.1rem 0.6rem;
+        border-radius: 0.6rem 0.6rem 0 0;
+        background: var(--pf1e-ink);
+        color: #fff;
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-align: center;
+        text-transform: uppercase;
+    }
+
+    .bar {
+        position: relative;
+        margin: 0 0 0.3rem;
+    }
+
+    // --- Sheet tab: the paper front page -----------------------------------------------------------
+    .paper {
+        .id-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+            gap: 0.3rem 0.8rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .id-field {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+
+            &.wide {
+                grid-column: 1 / -1;
+            }
+
+            .id-val {
+                border-bottom: 1px solid var(--pf1e-ink);
+                font-size: 0.85rem;
+                min-height: 1.2em;
+            }
+
+            .cap {
+                max-width: none;
+                text-align: left;
+            }
+        }
+
+        .paper-hint {
+            margin-bottom: 0.6rem;
+            color: #666;
+            font-size: 0.72rem;
+            font-style: italic;
+        }
+
+        .paper-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+            gap: 0.8rem 1rem;
+            align-items: start;
+        }
+
+        .block {
+            min-width: 0;
+
+            &.full {
+                grid-column: 1 / -1;
+            }
+        }
+
+        .block-text {
+            margin-bottom: 0.5rem;
+            font-size: 0.82rem;
+        }
+
+        .small-note {
+            margin: 0 0 0.35rem;
+            color: #444;
+            font-size: 0.7rem;
+
+            &.inline {
+                margin: 0 0 0 0.4rem;
+            }
+        }
+
+        .cap {
+            display: block;
+            max-width: 4rem;
+            margin-top: 0.05rem;
+            color: #444;
+            font-size: 0.5rem;
+            font-weight: 600;
+            line-height: 1;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        // A black label: "STR" over a tiny "Strength".
+        .tag {
+            display: inline-flex;
+            flex: 0 0 auto;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 3.4rem;
+            min-height: 1.7rem;
+            padding: 0.1rem 0.3rem;
+            background: var(--pf1e-ink);
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 800;
+            line-height: 1;
+            text-align: center;
+            text-transform: uppercase;
+
+            &.wide {
+                min-width: 5.6rem;
+            }
+
+            small {
+                margin-top: 0.1rem;
+                font-size: 0.45rem;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+        }
+
+        // A boxed number, as on the paper sheet; highlighted when it is a total (and clickable to roll).
+        .box {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.2rem;
+            height: 1.6rem;
+            padding: 0 0.25rem;
+            border: 1.5px solid var(--pf1e-ink);
+            background: #fff;
+            color: var(--pf1e-ink);
+            font: inherit;
+            font-size: 0.9rem;
+            font-weight: 700;
+            white-space: nowrap;
+
+            &.total {
+                background: var(--pf1e-total);
+            }
+
+            &.temp {
+                background: #fde7c7;
+            }
+        }
+
+        button.box {
+            cursor: pointer;
+
+            &:hover:not(:disabled) {
+                background: var(--pf1e-total-hover);
+            }
+        }
+
+        input.box.hp-current {
+            width: 3.6rem;
+            text-align: center;
+        }
+
+        .cell {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .op {
+            align-self: flex-start;
+            padding: 0.25rem 0.05rem 0;
+            font-size: 0.8rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .stat-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 0.25rem 0.3rem;
+            margin-bottom: 0.45rem;
+        }
+
+        .macro-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.1rem;
+            align-self: center;
+            margin-left: auto;
+            font-size: 0.65rem;
+            font-weight: 700;
+
+            &.on-bar {
+                position: absolute;
+                top: 50%;
+                right: 0.5rem;
+                transform: translateY(-50%);
+                color: #fff;
+            }
+        }
+
+        .ability-head,
+        .ability-line {
+            display: grid;
+            grid-template-columns: 4.6rem repeat(4, 2.6rem);
+            gap: 0.25rem;
+            align-items: center;
+            margin-bottom: 0.2rem;
+        }
+
+        .ability-line .tag {
+            min-width: 0;
+        }
+
+        .weapon-table {
+            width: 100%;
+            border: 1.5px solid var(--pf1e-ink);
+            border-collapse: collapse;
+
+            td {
+                padding: 0.1rem 0.3rem;
+                border: 1px solid var(--pf1e-ink);
+                font-size: 0.82rem;
+                vertical-align: middle;
+            }
+
+            tr.caps td {
+                padding: 0 0.3rem;
+                background: var(--pf1e-ink);
+                color: #fff;
+                font-size: 0.5rem;
+                font-weight: 700;
+                text-align: center;
+                text-transform: uppercase;
+            }
+
+            .w-name {
+                width: 45%;
+                font-weight: 700;
+            }
+
+            .w-attack .box {
+                margin-right: 0.2rem;
+            }
+
+            .box.dmg {
+                min-width: 3rem;
+            }
+        }
+
+        .paper-table {
+            th {
+                border-bottom: 1.5px solid var(--pf1e-ink);
+                font-size: 0.6rem;
+                text-transform: uppercase;
+            }
+
+            th,
+            td {
+                padding: 0.15rem 0.25rem;
+                overflow-wrap: normal;
+            }
+
+            td {
+                border-bottom: 1px dotted #999;
+                font-size: 0.82rem;
+                vertical-align: middle;
+            }
+
+            .num {
+                text-align: center;
+            }
+
+            .flags {
+                width: 1rem;
+                min-width: 0;
+                text-align: center;
+            }
+
+            .flag {
+                margin-left: 0.2rem;
+                padding: 0 0.15rem;
+                border: 1px solid #999;
+                color: #555;
+                font-size: 0.55rem;
+                font-weight: 700;
+            }
+
+            .box {
+                min-width: 2rem;
+                height: 1.3rem;
+                font-size: 0.8rem;
+            }
+
+            .temp-inline {
+                color: #a35a00;
+                font-weight: 700;
+            }
+
+            .skill-name {
+                cursor: help;
+            }
+
+            .skill-ability {
+                margin-left: 0.2rem;
+                color: #666;
+                font-size: 0.6rem;
+            }
+
+            th {
+                white-space: nowrap;
+            }
+        }
     }
 
     ul,
@@ -1790,6 +2757,37 @@ function fmt(n: number): string {
         white-space: nowrap;
     }
 
+    .uses-left {
+        white-space: nowrap;
+
+        input {
+            width: 3.5rem;
+            text-align: center;
+        }
+
+        button {
+            padding: 0 0.4rem;
+        }
+    }
+
+    .config-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.85rem;
+
+        &.columns {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+        }
+
+        .hint {
+            color: #666;
+            font-size: 0.75rem;
+        }
+    }
+
     .custom-adjustment-form {
         display: flex;
         flex-direction: column;
@@ -1882,13 +2880,6 @@ function fmt(n: number): string {
         }
     }
 
-    .roll-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.4rem;
-        margin-bottom: 0.75rem;
-    }
-
     .roll-cell {
         white-space: nowrap;
 
@@ -1909,56 +2900,6 @@ function fmt(n: number): string {
         }
     }
 
-    .grid-3 {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-        gap: 0.5rem 1rem;
-        margin-bottom: 1rem;
-
-        label {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-            font-size: 0.75rem;
-            color: #555;
-
-            input {
-                width: 100%;
-                font-size: 0.9rem;
-            }
-
-            // Current HP is the one editable number; keep it small so it never widens the row.
-            input.hp-current {
-                width: 5rem;
-            }
-        }
-    }
-
-    .abilities {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-
-        .ability {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-
-            .ability-roll {
-                margin-top: 0.2rem;
-                padding: 0.1rem 0.45rem;
-                font-size: 0.7rem;
-            }
-
-            .score {
-                min-width: 2.2rem;
-                text-align: center;
-                font-size: 1.15rem;
-                font-weight: bold;
-            }
-        }
-    }
-
     // Tables scroll sideways inside their own container rather than widening the whole sheet.
     .table-wrap {
         max-width: 100%;
@@ -1974,8 +2915,16 @@ function fmt(n: number): string {
         td {
             text-align: left;
             padding: 0.2rem 0.4rem;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px dotted #999;
             vertical-align: top;
+        }
+
+        // Paper-sheet column headings: small capitals over an ink rule.
+        th {
+            border-bottom: 1.5px solid var(--pf1e-ink);
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            white-space: nowrap;
         }
 
         // The first column is usually a name; let it wrap rather than force a wide table.
@@ -1987,6 +2936,10 @@ function fmt(n: number): string {
     // Native title-attribute tooltip trigger. Deliberately not a custom CSS popup: this
     // server has already shown global styles can leak into our elements in surprising ways
     // (see the earlier feats-as-columns bug), and the browser's own tooltip is immune to that.
+    .hover-info {
+        cursor: help;
+    }
+
     .info-icon {
         display: inline-block;
         margin-left: 0.3rem;

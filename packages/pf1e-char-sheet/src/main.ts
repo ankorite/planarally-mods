@@ -69,9 +69,10 @@ function onTrackerUpdated(payload: unknown): void {
     } catch {
         return;
     }
-    if (!tracker || !isHpTrackerName(tracker.name)) return;
+    if (!tracker || !Number.isFinite(tracker.value)) return;
 
-    void syncTrackerIntoSheet(id, tracker.value, character);
+    if (isHpTrackerName(tracker.name)) void syncHpIntoSheet(id, tracker.value, character);
+    else void syncResourceIntoSheet(id, p.trackerId, tracker.value);
 }
 
 /**
@@ -79,34 +80,49 @@ function onTrackerUpdated(payload: unknown): void {
  * comes from the Hero Lab import and is read-only on the sheet, and a hand-made tracker often has
  * maxvalue 0, which must never overwrite a real max.
  *
- * A character always has a sheet, so its DataBlock is created if needed. Any other token only has
- * one if the DM imported a monster/NPC onto it, so for those an existing DataBlock is required:
- * changing HP on an ordinary token never creates sheet data.
+ * A character always has a sheet, so its DataBlock is created if needed.
  */
-async function syncTrackerIntoSheet(id: LocalId, current: number, character: boolean): Promise<void> {
-    if (!Number.isFinite(current)) return;
-    const shapeId = api.getGlobalId(id);
-    if (!shapeId) return;
-
-    const repr = { category: "shape", shape: shapeId, name: DATA_BLOCK_NAME } as const;
-    let block;
-    try {
-        block = character
-            ? await api.getOrLoadDataBlock<PF1Character>(repr, { defaultData: emptyCharacter })
-            : (api.getDataBlock<PF1Character>(repr) ?? (await api.loadDataBlock<PF1Character>(repr)));
-    } catch {
-        return;
-    }
-    if (!block) return;
-
+async function syncHpIntoSheet(id: LocalId, current: number, character: boolean): Promise<void> {
+    const block = await sheetBlock(id, character);
     // Also skips the echo of our own sheet -> tracker push.
-    if (block.data.combat.hp.current === current) return;
+    if (!block || block.data.combat.hp.current === current) return;
 
     // Write through `reactiveData`, not `block.data`: both are the same object, but only the reactive
     // proxy tells Vue about the change. Writing `block.data` directly stored and synced the new HP but
     // left an open sheet showing the old value, which its next HP commit could push back to the tracker.
     block.reactiveData.value.combat.hp.current = current;
     block.sync();
+}
+
+/** Writes a resource tracker's value (x/day, charges, spell slots) into the sheet's uses left. */
+async function syncResourceIntoSheet(id: LocalId, trackerId: string, current: number): Promise<void> {
+    // Only a token that already has a sheet can have one of its resource trackers.
+    const block = await sheetBlock(id, false);
+    const resource = block?.reactiveData.value.resources?.find((r) => r.uuid === trackerId);
+    if (!block || !resource) return;
+    const left = Math.max(0, Math.min(resource.max, current));
+    if (resource.left === left) return;
+    resource.left = left;
+    block.sync();
+}
+
+/**
+ * The token's sheet DataBlock. A character always has a sheet, so with `create` its block is made
+ * if needed. Any other token only has one if the DM imported a monster/NPC onto it, so otherwise an
+ * existing block is required: changing a tracker on an ordinary token never creates sheet data.
+ */
+async function sheetBlock(id: LocalId, create: boolean) {
+    const shapeId = api.getGlobalId(id);
+    if (!shapeId) return;
+
+    const repr = { category: "shape", shape: shapeId, name: DATA_BLOCK_NAME } as const;
+    try {
+        return create
+            ? await api.getOrLoadDataBlock<PF1Character>(repr, { defaultData: emptyCharacter })
+            : (api.getDataBlock<PF1Character>(repr) ?? (await api.loadDataBlock<PF1Character>(repr)));
+    } catch {
+        return undefined;
+    }
 }
 
 export const events: ModEvents = {

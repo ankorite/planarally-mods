@@ -55,7 +55,7 @@ export class MissingFieldsError extends RollError {
     constructor(missing: string[]) {
         super(
             `Custom Data field${missing.length > 1 ? "s" : ""} ${missing.map((m) => `{${m}}`).join(", ")} not found on ` +
-                `this token - use "Export to Custom Data" on the Core tab.`,
+                `this token - use "Export to Custom Data" on the Token tab.`,
         );
         this.missing = missing;
     }
