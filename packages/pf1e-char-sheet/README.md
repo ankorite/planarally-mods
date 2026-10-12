@@ -275,6 +275,10 @@ is wrong or missing; clear the field to go back to the guess. Ticked spells with
 `Cast <spell>` dice macros. The choices and edited formulas are saved with the character and kept when
 you re-import.
 
+Each spell also shows its **casting defensively** check: the class's concentration bonus (plus 4 with
+the Combat Casting feat, which Hero Lab doesn't include in its concentration total) against DC 15 + 2 ×
+the spell's level, with a **Roll** button for 1d20 + concentration.
+
 ## Trackers for limited-use abilities
 
 Hero Lab exports every limited-use ability and charged item as a tracked resource ("Darkness (3/day)",

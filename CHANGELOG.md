@@ -11,6 +11,8 @@
     - skills, feats, spells and specials show a styled rule card after a hover (3 seconds by default, set
       on the Config tab) instead of a plain tooltip;
       click to pin it, and a pinned card can open the rule's compendium page
+    - each spell shows its casting defensively check (concentration bonus, +4 with Combat Casting,
+      vs DC 15 + 2 × spell level) with a Roll button
 
 ## [2026-10-09]
 

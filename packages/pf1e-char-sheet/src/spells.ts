@@ -97,3 +97,13 @@ export function macroSpells(c: PF1Character): { name: string; formula: string }[
     }
     return out;
 }
+
+/** The concentration DC to cast a spell defensively: 15 + twice the spell's level. */
+export function defensiveDc(level: number): number {
+    return 15 + 2 * Math.max(0, level);
+}
+
+/** Combat Casting's +4 on concentration checks to cast defensively (not in Hero Lab's concentration total). */
+export function defensiveBonus(c: Pick<PF1Character, "feats">): number {
+    return c.feats.some((f) => /^combat casting\b/i.test(f.name.trim())) ? 4 : 0;
+}

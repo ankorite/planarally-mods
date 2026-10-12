@@ -60,7 +60,7 @@ import {
 } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
 import { moveRulesToCompendium, openRule, ruleRegistered, rulesReady, ruleText, type RuleKind } from "./rules";
-import { spellFormula, spellGuess, spellKey } from "./spells";
+import { defensiveBonus, defensiveDc, spellFormula, spellGuess, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
 import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
 
@@ -690,6 +690,27 @@ function rollSpell(sc: SpellcastingClass, spell: SpellEntry): void {
         return;
     }
     void doRoll(`Cast ${spell.name}`, formula);
+}
+
+/** A class's concentration bonus when casting defensively, or undefined if it has none to roll. */
+function defensiveTotal(sc: SpellcastingClass): number | undefined {
+    if (!sc.concentration) return undefined;
+    return sc.concentration + defensiveBonus(data.value);
+}
+
+/** Rolls the concentration check to cast a spell defensively: 1d20 + concentration (+4 Combat Casting). */
+function rollDefensive(sc: SpellcastingClass, spell: SpellEntry): void {
+    const field = sheetNames.value.concentration[sc.className];
+    const dc = defensiveDc(spell.level);
+    if (!field) {
+        rollStatus.value = `${sc.className}: no concentration field to roll - re-import the character.`;
+        return;
+    }
+    const bonus = defensiveBonus(data.value);
+    void doRoll(
+        `Cast defensively: ${spell.name} (DC ${dc})`,
+        bonus ? `${checkFormula(field)} + ${bonus}` : checkFormula(field),
+    );
 }
 
 const newAdjName = ref("");
@@ -2142,6 +2163,21 @@ function fmt(n: number): string {
                                     <span v-if="spell.dc" :title="spell.save">DC {{ spell.dc }}</span>
                                     <span v-if="spell.range">{{ spell.range }}</span>
                                     <span v-if="spell.duration">{{ spell.duration }}</span>
+                                    <span
+                                        v-if="defensiveTotal(sc) !== undefined"
+                                        class="defensive"
+                                        :title="`Concentration check to cast defensively: 1d20 ${fmt(defensiveTotal(sc)!)} vs DC 15 + 2 × spell level${defensiveBonus(data) ? ' (includes Combat Casting +4)' : ''}`"
+                                    >
+                                        Defensive {{ fmt(defensiveTotal(sc)!) }} vs DC {{ defensiveDc(spell.level) }}
+                                        <button
+                                            type="button"
+                                            class="def-roll"
+                                            :disabled="rolling"
+                                            @click="rollDefensive(sc, spell)"
+                                        >
+                                            Roll
+                                        </button>
+                                    </span>
                                 </div>
                                 <div class="hint">{{ spell.description }}</div>
                             </div>
@@ -2997,6 +3033,16 @@ function fmt(n: number): string {
             gap: 0 0.6rem;
             color: #555;
             font-size: 0.75rem;
+
+            .defensive {
+                white-space: nowrap;
+            }
+
+            .def-roll {
+                margin-left: 0.2rem;
+                padding: 0 0.3rem;
+                font-size: 0.7rem;
+            }
         }
 
         .spell-controls {
