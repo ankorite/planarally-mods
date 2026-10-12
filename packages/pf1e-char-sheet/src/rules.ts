@@ -43,17 +43,15 @@ interface CompendiumSystem {
     toggle?: () => void;
 }
 
+/**
+ * PlanarAlly's compendium system: from the mod API's systems, else from the `systems` PlanarAlly puts on
+ * `window` (the same registry). Some PlanarAlly versions don't hand it to mods; then this is undefined
+ * and the sheet works the panel through the page instead.
+ */
 function compendiumSystem(api: GameApi | undefined): CompendiumSystem | undefined {
-    return (api?.systems as unknown as Record<string, unknown> | undefined)?.["compendium"] as
-        | CompendiumSystem
-        | undefined;
-}
-
-function compendiumOpen(api: GameApi): boolean {
-    const state = (api.systemsState as unknown as Record<string, unknown>)["compendium"] as
-        | { reactive?: { open?: boolean } }
-        | undefined;
-    return state?.reactive?.open === true;
+    const fromApi = (api?.systems as unknown as Record<string, unknown> | undefined)?.["compendium"];
+    const fromWindow = (window as unknown as { systems?: Record<string, unknown> }).systems?.["compendium"];
+    return (fromApi ?? fromWindow) as CompendiumSystem | undefined;
 }
 
 /** True once the rules block is loaded, i.e. rules text lives in the compendium (reactive, for the sheet). */
@@ -147,9 +145,11 @@ export function ruleText(kind: RuleKind, name: string): string {
     return fromCompendium ?? block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
 }
 
-/** Whether a rule is registered in PlanarAlly's compendium (so its page can be opened). */
+/** Whether a rule is in PlanarAlly's compendium (so its page can be opened): registered there, or in this mod's rules block, which is what gets registered. */
 export function ruleRegistered(kind: RuleKind, name: string): boolean {
-    return registeredRef(kind, name) !== undefined;
+    return (
+        registeredRef(kind, name) !== undefined || block?.reactiveData.value.entries[ruleId(kind, name)] !== undefined
+    );
 }
 
 /** PlanarAlly's reference to a rule, for its rule popover and for chat links: "pf1e-sheet/feat-power-attack". */
@@ -160,11 +160,12 @@ export function ruleRef(kind: RuleKind, name: string): string {
 /**
  * Opens a rule's page in PlanarAlly's compendium panel.
  *
- * The panel keeps its selected entry to itself and the mod API can't navigate it, so this opens the
- * panel, types the rule's name into its search box and picks the "PF1e (Hero Lab)" result - what you
- * would do by hand - then brings the panel to the front. If that doesn't work (a PlanarAlly version
- * with a different panel), it shows PlanarAlly's rule popover at the mouse instead. Returns ok: false when
- * the rule isn't in the compendium, with the reason (also logged to the console).
+ * The panel keeps its selected entry to itself and the mod API can't navigate it, so this works the page
+ * the way you would by hand: opens the panel (with the compendium system's toggle when PlanarAlly hands
+ * it to mods, else with the menu's Compendium button), types the rule's name into its search box and
+ * clicks the "PF1e (Hero Lab)" result, then brings the panel to the front. If that fails and the
+ * compendium system is available, PlanarAlly's rule popover is shown at the mouse instead. Returns
+ * ok: false with the reason (also logged to the console) when it can't do either.
  */
 export async function openRule(
     api: GameApi,
@@ -172,50 +173,81 @@ export async function openRule(
     name: string,
     event: MouseEvent,
 ): Promise<{ ok: boolean; reason: string }> {
+    const fail = (reason: string): { ok: boolean; reason: string } => {
+        console.info(`[pf1e-sheet] compendium: ${reason}`);
+        return { ok: false, reason };
+    };
+    if (!ruleRegistered(kind, name)) {
+        return fail(`"${name}" isn't in the compendium yet - re-import the character (or open its sheet) to add it`);
+    }
     const compendium = compendiumSystem(api);
-    if (!compendium?.getEntry) {
-        const reason = "this PlanarAlly has no compendium system to open";
-        console.info(`[pf1e-sheet] compendium: ${reason}`);
-        return { ok: false, reason };
-    }
-    const ref = registeredRef(kind, name);
-    if (!ref) {
-        const all = compendium.listEntries?.() ?? [];
-        const ours = all.filter((e) => e.book === BOOK);
-        const reason = `"${name}" isn't in the compendium (looked for ${ruleRef(kind, name)}; the ${BOOK} book has ${ours.length} entries${ours[0] ? `, e.g. ${ours[0].ref}` : ""})`;
-        console.info(`[pf1e-sheet] compendium: ${reason}`);
-        return { ok: false, reason };
-    }
     const { clientX, clientY } = event;
 
     try {
-        if (!compendiumOpen(api)) compendium.toggle?.();
-        await nextTick();
-        const panel = document.querySelector<HTMLElement>("#compendium");
-        const search = panel?.querySelector<HTMLInputElement>("input[type=search]");
-        if (panel && search) {
-            search.value = name;
-            search.dispatchEvent(new Event("input", { bubbles: true }));
-            await nextTick();
-            const hit = Array.from(panel.querySelectorAll<HTMLButtonElement>("#compendium-list button")).find(
+        if (!panelVisible()) {
+            if (compendium?.toggle) compendium.toggle();
+            else {
+                const menu = compendiumMenuButton();
+                if (!menu) {
+                    const systems = Object.keys((api.systems as unknown as Record<string, unknown>) ?? {}).join(", ");
+                    return fail(
+                        `couldn't find the Compendium menu button to open the panel (mod API systems: ${systems})`,
+                    );
+                }
+                menu.click();
+            }
+        }
+        const panel = await waitFor(() => (panelVisible() ? document.querySelector<HTMLElement>("#compendium") : null));
+        const search = panel?.querySelector<HTMLInputElement>("input[type=search], input");
+        if (!panel || !search) return fail("the compendium panel didn't open");
+        search.value = name;
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        const hit = await waitFor(() =>
+            Array.from(panel.querySelectorAll<HTMLButtonElement>("#compendium-list button, button")).find(
                 (b) =>
                     b.querySelector("span")?.textContent?.trim() === name &&
                     (b.querySelector("small")?.textContent ?? "").includes(BOOK),
-            );
-            if (hit) {
-                hit.click();
-                panel.click(); // the panel's own click handler brings it in front of other dialogs
-                return { ok: true, reason: "" };
-            }
-            console.info(`[pf1e-sheet] compendium: no search result for "${name}"; showing the popover instead`);
-        } else {
-            console.info("[pf1e-sheet] compendium: panel not found; showing the popover instead");
+            ),
+        );
+        if (hit) {
+            hit.click();
+            panel.click(); // the panel's own click handler brings it in front of other dialogs
+            return { ok: true, reason: "" };
         }
+        console.info(`[pf1e-sheet] compendium: no "${BOOK}" search result for "${name}"`);
     } catch (e) {
         console.warn("[pf1e-sheet] couldn't open the compendium page", e);
     }
-    compendium.openRuleAt?.(ref, clientX, clientY);
-    return { ok: true, reason: "" };
+    const ref = registeredRef(kind, name) ?? ruleRef(kind, name);
+    if (compendium?.openRuleAt) {
+        compendium.openRuleAt(ref, clientX, clientY);
+        return { ok: true, reason: "" };
+    }
+    return fail(`couldn't find "${name}" in the compendium panel`);
+}
+
+/** Whether PlanarAlly's compendium panel is on screen (it is always in the page, hidden with v-show). */
+function panelVisible(): boolean {
+    const container = document.querySelector<HTMLElement>("#compendium-container");
+    return container !== null && getComputedStyle(container).display !== "none";
+}
+
+/** The game menu's Compendium button (only shown when some mod registered a compendium). */
+function compendiumMenuButton(): HTMLElement | undefined {
+    return Array.from(document.querySelectorAll<HTMLElement>("button, .menu-accordion, [role=button]")).find(
+        (el) => el.textContent?.trim().toLowerCase() === "compendium" && !el.closest("#pf1e-sheet"),
+    );
+}
+
+/** Polls `get` for up to ~1.5 s (Vue renders the panel after the next tick or two). */
+async function waitFor<T>(get: () => T | null | undefined): Promise<T | undefined> {
+    for (let i = 0; i < 30; i++) {
+        await nextTick();
+        const value = get();
+        if (value) return value;
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    return undefined;
 }
 
 /**
