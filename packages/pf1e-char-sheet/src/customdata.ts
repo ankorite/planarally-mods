@@ -206,7 +206,8 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
         if (!excludedRolls.has(roll)) add(MACRO_PREFIX, `Roll ${roll}`, "dice-expression", checkFormula(field));
     }
     // Per weapon: one macro per iterative attack, then its damage - unless unticked on the Sheet tab.
-    const excludedAttacks = new Set(c.macroExcludedAttacks ?? []);
+    // Weapons and skills hidden on the Config tab are out of the macros too.
+    const excludedAttacks = new Set([...(c.macroExcludedAttacks ?? []), ...(c.sheetConfig?.hiddenWeapons ?? [])]);
     c.combat.attacks.forEach((atk, i) => {
         const entry = attacks[i];
         if (!entry) return;
@@ -223,7 +224,8 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
         }
         if (entry.damage) entry.dmg = add(MACRO_PREFIX, `Roll Damage ${label}`, "dice-expression", entry.damage);
     });
-    const macroSkills = new Set(c.macroSkills ?? []);
+    const hiddenSkills = new Set(c.sheetConfig?.hiddenSkills ?? []);
+    const macroSkills = new Set((c.macroSkills ?? []).filter((n) => !hiddenSkills.has(n)));
     c.skills.forEach((skill, i) => {
         const fieldName = skills[i];
         if (fieldName && macroSkills.has(skill.name)) {

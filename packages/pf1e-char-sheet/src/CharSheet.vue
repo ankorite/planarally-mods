@@ -36,6 +36,8 @@ import {
     type AdjustmentState,
     type AdjustmentTarget,
     type PF1Character,
+    SHEET_SECTIONS,
+    type SheetConfig,
     type SheetResource,
     type SpecialEntry,
     type SpellcastingClass,
@@ -208,8 +210,28 @@ function setWidth(w: WidthKey): void {
 
 // "Sheet" is the paper-style front page (abilities, combat, saves, weapons, skills); "Token" has what
 // acts on the token itself (auras, Custom Data, the HP push).
-const BASE_TABS = ["Sheet", "Spells", "Resources", "Adjustments", "Feats", "Specials", "Inventory", "Token"] as const;
-const LIMITED_TABS = ["Sheet", "Spells", "Resources", "Adjustments", "Specials", "Token"] as const;
+const BASE_TABS = [
+    "Sheet",
+    "Spells",
+    "Resources",
+    "Adjustments",
+    "Feats",
+    "Specials",
+    "Inventory",
+    "Token",
+    "Config",
+] as const;
+const LIMITED_TABS = ["Sheet", "Spells", "Resources", "Adjustments", "Specials", "Token", "Config"] as const;
+/** Tabs the Config tab can hide (the Sheet, Config and Diagnostics tabs always show). */
+const HIDEABLE_TABS: readonly string[] = [
+    "Spells",
+    "Resources",
+    "Adjustments",
+    "Feats",
+    "Specials",
+    "Inventory",
+    "Token",
+];
 type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Sheet");
 
@@ -222,7 +244,10 @@ const hasSpells = computed(() => data.value.spellcasting.some((sc) => sc.spells.
 const hasResources = computed(() => (data.value.resources ?? []).length > 0);
 const visibleTabs = computed<readonly TabName[]>(() => {
     const all: readonly TabName[] = isCharacter.value ? BASE_TABS : LIMITED_TABS;
-    const tabs = all.filter((t) => (t !== "Spells" || hasSpells.value) && (t !== "Resources" || hasResources.value));
+    const hiddenTabs = new Set(data.value.sheetConfig?.hiddenTabs ?? []);
+    const tabs = all.filter(
+        (t) => (t !== "Spells" || hasSpells.value) && (t !== "Resources" || hasResources.value) && !hiddenTabs.has(t),
+    );
     return isDm.value ? [...tabs, "Diagnostics"] : tabs;
 });
 
@@ -384,6 +409,10 @@ async function onFileSelected(event: Event): Promise<void> {
         }
         // And the roll macros switched off on the Sheet tab.
         character.macroExcludedRolls = [...(data.value.macroExcludedRolls ?? [])];
+        // And what the Config tab hides.
+        if (data.value.sheetConfig) {
+            character.sheetConfig = JSON.parse(JSON.stringify(data.value.sheetConfig)) as SheetConfig;
+        }
         // And the trackers switched off on the Specials tab.
         const resourceKeys = new Set((character.resources ?? []).map((r) => r.key));
         character.trackedResources = trackedKeys(data.value).filter((k) => resourceKeys.has(k));
@@ -570,6 +599,40 @@ function saveAndReexport(message: string): void {
     clearTimeout(macroStatusTimeout);
     macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
 }
+
+// --- Config tab: what the sheet shows ---------------------------------------------------------------
+
+type ConfigList = "hiddenWeapons" | "hiddenSkills" | "hiddenSections" | "hiddenTabs";
+
+function isHidden(list: ConfigList, name: string): boolean {
+    return (data.value.sheetConfig?.[list] as string[] | undefined)?.includes(name) ?? false;
+}
+
+/** Shows or hides one thing. Weapons and skills also leave the dice macros, so those re-export. */
+function setShown(list: ConfigList, name: string, shown: boolean, label = name): void {
+    const config = (data.value.sheetConfig ??= {});
+    const rest = ((config[list] as string[] | undefined) ?? []).filter((n) => n !== name);
+    (config[list] as string[]) = shown ? rest : [...rest, name];
+    const message = `${label}: ${shown ? "shown" : "hidden"}.`;
+    if (list === "hiddenWeapons" || list === "hiddenSkills") saveAndReexport(message);
+    else {
+        save();
+        macroStatus.value = message;
+        clearTimeout(macroStatusTimeout);
+        macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+    }
+}
+
+/** Hides every skill without ranks (or shows every skill again). */
+function hideSkillsWithoutRanks(hide: boolean): void {
+    const config = (data.value.sheetConfig ??= {});
+    config.hiddenSkills = hide ? data.value.skills.filter((s) => s.ranks <= 0).map((s) => s.name) : [];
+    saveAndReexport(hide ? "Skills without ranks hidden." : "All skills shown.");
+}
+
+const configTabs = computed(() =>
+    (isCharacter.value ? BASE_TABS : LIMITED_TABS).filter((t) => HIDEABLE_TABS.includes(t)),
+);
 
 function toggleAdjustment(key: string, name: string, on: boolean): void {
     const state = adjustmentState();
@@ -1093,6 +1156,11 @@ const skillRows = computed(() =>
     }),
 );
 
+const shownSkillRows = computed(() => {
+    const hidden = new Set(data.value.sheetConfig?.hiddenSkills ?? []);
+    return skillRows.value.filter((r) => !hidden.has(r.skill.name));
+});
+
 const gearMoney = computed(() => {
     const m = data.value.currency;
     return [
@@ -1222,7 +1290,7 @@ function fmt(n: number): string {
             </div>
 
             <div class="paper-grid">
-                <section class="block">
+                <section class="block" v-if="!isHidden('hiddenSections', 'abilities')">
                     <div class="bar">Abilities</div>
                     <div class="ability-head">
                         <span></span>
@@ -1264,7 +1332,7 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section class="block">
+                <section class="block" v-if="!isHidden('hiddenSections', 'hp')">
                     <div class="stat-line">
                         <span class="tag">HP<small>Hit points</small></span>
                         <span class="cell">
@@ -1347,7 +1415,7 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section class="block full">
+                <section class="block full" v-if="!isHidden('hiddenSections', 'ac')">
                     <div class="stat-line">
                         <span class="tag">AC<small>Armor class</small></span>
                         <span class="cell">
@@ -1380,7 +1448,7 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section class="block full">
+                <section class="block full" v-if="!isHidden('hiddenSections', 'saves')">
                     <div class="bar">Saving throws</div>
                     <div v-for="row of saveRows" :key="row.key" class="stat-line">
                         <span class="tag wide"
@@ -1428,7 +1496,7 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section class="block full">
+                <section class="block full" v-if="!isHidden('hiddenSections', 'attack')">
                     <div class="stat-line">
                         <span class="tag wide">Base attack<small>bonus</small></span>
                         <span class="box">{{ fmt(view.combat.bab) }}</span>
@@ -1500,70 +1568,77 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section v-for="(atk, i) of view.combat.attacks" :key="`atk-${i}`" class="block weapon">
-                    <div class="bar">
-                        Weapon
-                        <label
-                            class="macro-box on-bar"
-                            :title="`${atk.name}'s attack and damage in PlanarAlly's dice macros`"
-                        >
-                            <input
-                                type="checkbox"
-                                :checked="isMacroAttack(atk.name)"
-                                @change="toggleMacroAttack(atk.name, ($event.target as HTMLInputElement).checked)"
-                            />M
-                        </label>
-                    </div>
-                    <table class="weapon-table">
-                        <tr class="caps">
-                            <td class="w-name"></td>
-                            <td>Attack bonus</td>
-                            <td>Critical</td>
-                        </tr>
-                        <tr>
-                            <td class="w-name">{{ atk.name }}</td>
-                            <td class="w-attack">
-                                <span v-if="!sheetNames.attacks[i]?.atk">{{ atk.bonus }}</span>
-                                <button
-                                    v-for="(_, n) of sheetNames.attacks[i]?.atk ? sheetNames.attacks[i]!.offsets : []"
-                                    :key="n"
-                                    type="button"
-                                    class="box total"
-                                    :disabled="rolling"
-                                    :title="`Roll ${ordinal(n + 1)} attack`"
-                                    @click="rollAttack(i, n)"
-                                >
-                                    {{ attackBonusLabel(i, n) }}
-                                </button>
-                            </td>
-                            <td>{{ atk.critical }}</td>
-                        </tr>
-                        <tr class="caps">
-                            <td>Type</td>
-                            <td>Range</td>
-                            <td>Damage</td>
-                        </tr>
-                        <tr>
-                            <td>{{ atk.damageType }}</td>
-                            <td>{{ atk.range || "" }}</td>
-                            <td>
-                                <button
-                                    v-if="sheetNames.attacks[i]?.damage"
-                                    type="button"
-                                    class="box total dmg"
-                                    :disabled="rolling"
-                                    title="Roll damage"
-                                    @click="rollDamage(i)"
-                                >
-                                    {{ atk.damage }}
-                                </button>
-                                <span v-else>{{ atk.damage }}</span>
-                            </td>
-                        </tr>
-                    </table>
-                </section>
+                <template v-for="(atk, i) of view.combat.attacks" :key="`atk-${i}`">
+                    <section
+                        v-if="!isHidden('hiddenSections', 'weapons') && !isHidden('hiddenWeapons', atk.name)"
+                        class="block weapon"
+                    >
+                        <div class="bar">
+                            Weapon
+                            <label
+                                class="macro-box on-bar"
+                                :title="`${atk.name}'s attack and damage in PlanarAlly's dice macros`"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :checked="isMacroAttack(atk.name)"
+                                    @change="toggleMacroAttack(atk.name, ($event.target as HTMLInputElement).checked)"
+                                />M
+                            </label>
+                        </div>
+                        <table class="weapon-table">
+                            <tr class="caps">
+                                <td class="w-name"></td>
+                                <td>Attack bonus</td>
+                                <td>Critical</td>
+                            </tr>
+                            <tr>
+                                <td class="w-name">{{ atk.name }}</td>
+                                <td class="w-attack">
+                                    <span v-if="!sheetNames.attacks[i]?.atk">{{ atk.bonus }}</span>
+                                    <button
+                                        v-for="(_, n) of sheetNames.attacks[i]?.atk
+                                            ? sheetNames.attacks[i]!.offsets
+                                            : []"
+                                        :key="n"
+                                        type="button"
+                                        class="box total"
+                                        :disabled="rolling"
+                                        :title="`Roll ${ordinal(n + 1)} attack`"
+                                        @click="rollAttack(i, n)"
+                                    >
+                                        {{ attackBonusLabel(i, n) }}
+                                    </button>
+                                </td>
+                                <td>{{ atk.critical }}</td>
+                            </tr>
+                            <tr class="caps">
+                                <td>Type</td>
+                                <td>Range</td>
+                                <td>Damage</td>
+                            </tr>
+                            <tr>
+                                <td>{{ atk.damageType }}</td>
+                                <td>{{ atk.range || "" }}</td>
+                                <td>
+                                    <button
+                                        v-if="sheetNames.attacks[i]?.damage"
+                                        type="button"
+                                        class="box total dmg"
+                                        :disabled="rolling"
+                                        title="Roll damage"
+                                        @click="rollDamage(i)"
+                                    >
+                                        {{ atk.damage }}
+                                    </button>
+                                    <span v-else>{{ atk.damage }}</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </section>
+                </template>
 
-                <section class="block full">
+                <section v-if="!isHidden('hiddenSections', 'skills')" class="block full">
                     <div class="bar">Skills</div>
                     <div class="table-wrap">
                         <table class="paper-table skills-table">
@@ -1575,12 +1650,12 @@ function fmt(n: number): string {
                                     <th class="num" title="Ability modifier">Abil</th>
                                     <th class="num">Ranks</th>
                                     <th class="num">Misc</th>
-                                    <th v-if="skillRows.some((r) => r.temp !== undefined)" class="num">Temp</th>
+                                    <th v-if="shownSkillRows.some((r) => r.temp !== undefined)" class="num">Temp</th>
                                     <th title="Put Roll <skill> in PlanarAlly's dice macros">M</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="row of skillRows" :key="row.i">
+                                <tr v-for="row of shownSkillRows" :key="row.i">
                                     <td class="flags">
                                         <span v-if="row.skill.classSkill" title="Class skill">✓</span>
                                     </td>
@@ -1609,7 +1684,7 @@ function fmt(n: number): string {
                                     <td class="num">{{ fmt(row.abilityMod) }}</td>
                                     <td class="num">{{ row.ranks || "" }}</td>
                                     <td class="num">{{ row.misc ? fmt(row.misc) : "" }}</td>
-                                    <td v-if="skillRows.some((r) => r.temp !== undefined)" class="num temp-inline">
+                                    <td v-if="shownSkillRows.some((r) => r.temp !== undefined)" class="num temp-inline">
                                         {{ row.temp === undefined ? "" : fmt(row.temp) }}
                                     </td>
                                     <td>
@@ -1635,7 +1710,10 @@ function fmt(n: number): string {
                     </div>
                 </section>
 
-                <section v-if="(data.combat.maneuvers ?? []).length" class="block">
+                <section
+                    v-if="(data.combat.maneuvers ?? []).length && !isHidden('hiddenSections', 'maneuvers')"
+                    class="block"
+                >
                     <div class="bar">Combat maneuvers</div>
                     <table class="paper-table">
                         <thead>
@@ -1656,15 +1734,17 @@ function fmt(n: number): string {
                 </section>
 
                 <section class="block">
-                    <template v-if="(data.identity.languages ?? []).length">
+                    <template v-if="(data.identity.languages ?? []).length && !isHidden('hiddenSections', 'languages')">
                         <div class="bar">Languages</div>
                         <div class="block-text">{{ (data.identity.languages ?? []).join(" • ") }}</div>
                     </template>
-                    <div class="bar">Money &amp; experience</div>
-                    <div class="block-text">
-                        <div>{{ gearMoney || "0 gp" }}</div>
-                        <div v-if="data.xp">XP {{ data.xp.toLocaleString() }}</div>
-                    </div>
+                    <template v-if="!isHidden('hiddenSections', 'money')">
+                        <div class="bar">Money &amp; experience</div>
+                        <div class="block-text">
+                            <div>{{ gearMoney || "0 gp" }}</div>
+                            <div v-if="data.xp">XP {{ data.xp.toLocaleString() }}</div>
+                        </div>
+                    </template>
                 </section>
             </div>
         </div>
@@ -1996,6 +2076,67 @@ function fmt(n: number): string {
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <div v-else-if="activeTab === 'Config'" class="pf1e-panel">
+            <div class="readonly-note">
+                Choose what this sheet shows; the choices are saved with the character and kept when you re-import. A
+                hidden weapon or skill is also left out of PlanarAlly's dice macros.
+                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
+            </div>
+
+            <h4>Sheet sections</h4>
+            <div class="config-list">
+                <label v-for="[key, label] of SHEET_SECTIONS" :key="key">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenSections', key)"
+                        @change="setShown('hiddenSections', key, ($event.target as HTMLInputElement).checked, label)"
+                    />
+                    {{ label }}
+                </label>
+            </div>
+
+            <h4>Weapons</h4>
+            <div v-if="data.combat.attacks.length" class="config-list">
+                <label v-for="(atk, i) of data.combat.attacks" :key="i">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenWeapons', atk.name)"
+                        @change="setShown('hiddenWeapons', atk.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    {{ atk.name }} <span class="hint">{{ atk.bonus }} · {{ atk.damage }}</span>
+                </label>
+            </div>
+            <div v-else class="readonly-note">No weapons in the Hero Lab export.</div>
+
+            <h4>Skills</h4>
+            <div class="hp-push-row">
+                <button type="button" @click="hideSkillsWithoutRanks(true)">Hide skills without ranks</button>
+                <button type="button" @click="hideSkillsWithoutRanks(false)">Show all skills</button>
+            </div>
+            <div class="config-list columns">
+                <label v-for="skill of data.skills" :key="skill.name">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenSkills', skill.name)"
+                        @change="setShown('hiddenSkills', skill.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    {{ skill.name }}
+                </label>
+            </div>
+
+            <h4>Tabs</h4>
+            <div class="config-list">
+                <label v-for="tab of configTabs" :key="tab">
+                    <input
+                        type="checkbox"
+                        :checked="!isHidden('hiddenTabs', tab)"
+                        @change="setShown('hiddenTabs', tab, ($event.target as HTMLInputElement).checked, `${tab} tab`)"
+                    />
+                    {{ tab }}
+                </label>
             </div>
         </div>
 
@@ -2579,6 +2720,24 @@ function fmt(n: number): string {
 
         button {
             padding: 0 0.4rem;
+        }
+    }
+
+    .config-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.85rem;
+
+        &.columns {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+        }
+
+        .hint {
+            color: #666;
+            font-size: 0.75rem;
         }
     }
 

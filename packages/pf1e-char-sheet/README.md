@@ -83,8 +83,8 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/access.ts` — DM check and character check, shared by the tab filter and the sheet
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
 - `src/CharSheet.vue` — the sheet UI (Sheet / Spells / Resources / Adjustments / Feats / Specials /
-  Inventory / Token tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token for a
-  monster/NPC; Spells and Resources only when there are spells / limited-use resources)
+  Inventory / Token / Config tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token / Config
+  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -154,6 +154,18 @@ is re-imported.
 The **Token** tab has what acts on the token itself: **Push HP to tracker**, the auras with **Create /
 update auras on the token**, and the Custom Data buttons. The other tabs use the same black bars.
 
+### Config tab
+
+The **Config** tab chooses what the sheet shows, per character; the choices are kept when you re-import.
+
+- **Sheet sections**: switch off any block of the Sheet tab (e.g. Combat maneuvers, Money and experience).
+- **Weapons**: hide individual weapons, e.g. a bite or unarmed strike you never use.
+- **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
+- **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
+
+A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
+the sheet. Hiding a section or tab only hides it.
+
 ## Monsters and NPCs
 
 A token that isn't a PlanarAlly character gets a limited sheet, visible to the DM only. Export the
@@ -167,6 +179,7 @@ macros) but only has these tabs:
 - **Resources**: only when it has limited-use abilities or spell slots, as on the full sheet
 - **Specials**: Hero Lab's special abilities
 - **Token**: HP push, auras and Custom Data
+- **Config**: what the sheet shows (see Config tab)
 
 **Duplicate token** in the header makes a copy of the token with its sheet intact, e.g. to fill an
 encounter with five orcs from one import. The mod API can't create tokens, so it uses PlanarAlly's own

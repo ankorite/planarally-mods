@@ -10,6 +10,9 @@
       roll; M boxes choose the dice macros. It replaces the Core, Combat and Skills tabs; HP push,
       auras and Custom Data moved to a new **Token** tab, and the other tabs use the same style.
       Re-import to fill in the breakdowns
+    - **Config** tab: hide Sheet sections, individual weapons and skills (or every skill without
+      ranks) and whole tabs, per character and kept across re-imports; hidden weapons and skills also
+      leave the dice macros
     - Resources tab: every limited-use ability, charged item and spell level's slots with its uses
       left (− / + or type a number), kept on the sheet whether or not it is tracked on the token; a
       tracked one stays in step with its tracker both ways. **New day** refills the daily ones

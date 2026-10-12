@@ -253,6 +253,35 @@ export interface InventoryItem {
     notes: string;
 }
 
+/** The Sheet tab's sections, in order, as the Config tab lists them: [key, label]. */
+export const SHEET_SECTIONS = [
+    ["abilities", "Abilities"],
+    ["hp", "HP, initiative and speed"],
+    ["ac", "Armor class"],
+    ["saves", "Saving throws"],
+    ["attack", "Base attack, CMB and CMD"],
+    ["weapons", "Weapons"],
+    ["skills", "Skills"],
+    ["maneuvers", "Combat maneuvers"],
+    ["languages", "Languages"],
+    ["money", "Money and experience"],
+] as const;
+export type SheetSection = (typeof SHEET_SECTIONS)[number][0];
+
+/**
+ * What the Config tab hides. Everything is shown unless listed. A hidden weapon or skill is also left
+ * out of the dice macros (its M box isn't on the sheet any more); hiding a section or tab only hides it.
+ */
+export interface SheetConfig {
+    /** Weapon (attack) names. */
+    hiddenWeapons?: string[];
+    /** Skill names. */
+    hiddenSkills?: string[];
+    hiddenSections?: SheetSection[];
+    /** Tab names, e.g. "Feats". The Sheet, Config and Diagnostics tabs can't be hidden. */
+    hiddenTabs?: string[];
+}
+
 // Must be a `type` alias (not an `interface`): the mod API requires DataBlock data to satisfy
 // Record<string, unknown>, and only type aliases get an implicit index signature.
 export type PF1Character = {
@@ -353,6 +382,8 @@ export type PF1Character = {
      * Optional because characters saved before this existed don't have it.
      */
     adjustments?: AdjustmentState;
+    /** The Config tab's choices of what the sheet shows; kept across re-imports. Optional. */
+    sheetConfig?: SheetConfig;
     notes: string;
     /** Free-form provenance so the sheet can show "last imported ..." */
     importedAt: string | undefined;
