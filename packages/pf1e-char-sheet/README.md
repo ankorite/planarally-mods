@@ -95,6 +95,7 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
+- `src/rules.ts` — feat, spell and skill rules text in a campaign room block and PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
@@ -163,10 +164,39 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 - **Sheet sections**: switch off any block of the Sheet tab (e.g. Combat maneuvers, Money and experience).
 - **Weapons**: hide individual weapons, e.g. a bite or unarmed strike you never use.
 - **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
+- **Rule cards**: how many seconds to hover before a rule card appears (default 2; saved for this
+  browser, for every sheet).
 - **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
 
 A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
 the sheet. Hiding a section or tab only hides it.
+
+## Rule cards
+
+Resting the mouse on a skill, feat, spell or special for 2 seconds (set on the Config tab, per
+browser; 0 shows it at once) shows a rule card: the name in a black bar, a details line
+(a skill's breakdown and flags, a feat's category, a spell's level, school, casting time, range,
+duration and DC, a special's type, source and uses) and the rules text in paragraphs with
+**Benefit:** / **Check:**-style labels in bold. Moving onto the card keeps it open; clicking a name
+pins it, so long text can be scrolled. A pinned card for a feat, spell or skill that is in PlanarAlly's
+compendium has an **Open in compendium** button, which opens that rule's page in the compendium panel.
+
+## Compendium
+
+On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells
+and skills is stored **once per campaign** instead of on every token's sheet:
+
+- On import, any feat, spell or skill text the campaign doesn't have yet is saved in a shared room data
+  block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats, Spells by
+  school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
+  the short excerpts, which cuts a typical character's sheet data by about two thirds.
+- Characters imported before (or on a server without the compendium) move their text to the compendium
+  the first time their sheet is opened, as a re-import would.
+- Every client registers the book when the game loads, and again when anyone's import adds rules.
+- Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
+- A server without the compendium keeps the text on each sheet, as before. Characters imported before
+  this keep their text until they are re-imported.
+- The Diagnostics health check reports the compendium's size and this sheet's size.
 
 ## Monsters and NPCs
 
@@ -229,7 +259,10 @@ from imports made before this version count as melee until the character is re-i
 
 The **Spells** tab lists each spellcasting class (caster level, concentration, slots per day) with its
 spells grouped by level. Each spell shows its DC (hover for the save), range and duration under its
-name, a short excerpt, and the full rules text on hover (ⓘ).
+name; its rules text is on its rule card (rest the mouse on the name, or click it).
+Only spells the character can cast now are listed: Hero Lab also exports spells known above the highest
+level the class can cast yet (an oracle's whole cure line, for instance), and those are left out until
+a re-import after the character can cast them.
 It only appears when the character or creature has spells.
 
 Each spell has a **Macro** checkbox, a formula and a **Roll** button. Hero Lab doesn't export a spell's
@@ -244,6 +277,10 @@ Only dice that deal damage or heal count ("lingers 1d6 rounds" doesn't). Edit th
 is wrong or missing; clear the field to go back to the guess. Ticked spells with a formula become
 `Cast <spell>` dice macros. The choices and edited formulas are saved with the character and kept when
 you re-import.
+
+Each spell also shows its **casting defensively** check: the class's concentration bonus (plus 4 with
+the Combat Casting feat, which Hero Lab doesn't include in its concentration total) against DC 15 + 2 ×
+the spell's level, with a **Roll** button for 1d20 + concentration.
 
 ## Trackers for limited-use abilities
 

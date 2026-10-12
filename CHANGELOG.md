@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## [2026-10-12]
+
+- pf1e-char-sheet v0.22.0-beta.4:
+    - on servers with the compendium (mod API 0.2), feat, spell and skill rules text is stored once
+      per campaign (a room data block) and registered as the "PF1e (Hero Lab)" compendium book instead
+      of on every sheet (about two thirds smaller); the sheet reads the text from the compendium. Older
+      sheets move their text there when first opened. Specials stay on the sheet. Uses
+      `@planarally/mod-api` 0.2.0; older servers keep the text on the sheet
+    - skills, feats, spells and specials show a styled rule card after a hover (2 seconds by default, set
+      on the Config tab) instead of a plain tooltip;
+      click to pin it, and a pinned card can open the rule's compendium page
+    - the Spells tab lists only spells the character can cast now (Hero Lab also exports spells known
+      above the class's highest castable level) and no longer repeats each spell's text, which is on
+      its rule card
+    - each spell shows its casting defensively check (concentration bonus, +4 with Combat Casting,
+      vs DC 15 + 2 × spell level) with a Roll button
+
 ## [2026-10-09]
 
 - pf1e-char-sheet v0.22.0-beta.3:

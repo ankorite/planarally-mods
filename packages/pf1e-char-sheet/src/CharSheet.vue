@@ -59,7 +59,8 @@ import {
     usesLeft,
 } from "./resources";
 import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
-import { guessSpellFormula, spellFormula, spellKey } from "./spells";
+import { moveRulesToCompendium, openRule, ruleRegistered, rulesReady, ruleText, type RuleKind } from "./rules";
+import { defensiveBonus, defensiveDc, spellFormula, spellGuess, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
 import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
 
@@ -459,6 +460,15 @@ async function onFileSelected(event: Event): Promise<void> {
             }
         }
 
+        // The full rules text of feats, spells and skills goes to the campaign's compendium (once,
+        // shared by every token) when the server has one; the sheet keeps the excerpts.
+        try {
+            const added = moveRulesToCompendium(api, character);
+            if (added) notes.push(`Compendium: added ${added} rule${added === 1 ? "" : "s"} to "PF1e (Hero Lab)".`);
+        } catch (e) {
+            console.error("[pf1e-sheet] storing rules text in the compendium failed", e);
+        }
+
         write(character);
         save();
 
@@ -667,7 +677,7 @@ function setSpellFormula(sc: SpellcastingClass, spell: SpellEntry, value: string
     const state = spellMacroState();
     const key = spellKey(sc, spell);
     const trimmed = value.trim();
-    const guess = guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+    const guess = spellGuess(sc, spell);
     if (trimmed === "" || trimmed === guess) delete state.formulas[key];
     else state.formulas[key] = trimmed;
     saveAndReexport(`${spell.name}: formula ${trimmed || guess || "cleared"}.`);
@@ -680,6 +690,27 @@ function rollSpell(sc: SpellcastingClass, spell: SpellEntry): void {
         return;
     }
     void doRoll(`Cast ${spell.name}`, formula);
+}
+
+/** A class's concentration bonus when casting defensively, or undefined if it has none to roll. */
+function defensiveTotal(sc: SpellcastingClass): number | undefined {
+    if (!sc.concentration) return undefined;
+    return sc.concentration + defensiveBonus(data.value);
+}
+
+/** Rolls the concentration check to cast a spell defensively: 1d20 + concentration (+4 Combat Casting). */
+function rollDefensive(sc: SpellcastingClass, spell: SpellEntry): void {
+    const field = sheetNames.value.concentration[sc.className];
+    const dc = defensiveDc(spell.level);
+    if (!field) {
+        rollStatus.value = `${sc.className}: no concentration field to roll - re-import the character.`;
+        return;
+    }
+    const bonus = defensiveBonus(data.value);
+    void doRoll(
+        `Cast defensively: ${spell.name} (DC ${dc})`,
+        bonus ? `${checkFormula(field)} + ${bonus}` : checkFormula(field),
+    );
 }
 
 const newAdjName = ref("");
@@ -1004,6 +1035,18 @@ function rollDamage(i: number): void {
     void doRoll(`Damage: ${name}`, entry.dmg ? field(entry.dmg) : entry.damage);
 }
 
+/**
+ * The spells a class can cast now: up to the highest level it has slots for. (Imports already drop the
+ * rest; this also tidies sheets imported before that.) A class without slot data - racial spell-likes -
+ * keeps every spell.
+ */
+function castableSpells(sc: SpellcastingClass): SpellEntry[] {
+    const levels = Object.keys(sc.spellsPerDay).map(Number);
+    if (!levels.length) return sc.spells;
+    const max = Math.max(...levels);
+    return sc.spells.filter((s) => s.level <= max);
+}
+
 function spellsByLevel(spells: PF1Character["spellcasting"][number]["spells"]) {
     const byLevel = new Map<number, typeof spells>();
     for (const spell of spells) {
@@ -1157,42 +1200,218 @@ const skillRows = computed(() =>
     }),
 );
 
-/** A skill's hover text, like Hero Lab Classic's: the total and its parts, then the rules text. */
-function skillTooltip(row: (typeof skillRows.value)[number]): string {
+// A sheet imported before the compendium (or on a server without one) still carries its feat, spell and
+// skill rules text. On a server with the compendium, move that text there the first time the sheet is
+// opened, as a re-import would - so older sheets shrink and their rules get compendium pages too.
+watch(
+    () => [rulesReady.value, data.value] as const,
+    ([ready, c]) => {
+        if (!ready || currentLocalId.value === undefined || !c.importedAt) return;
+        const hasText =
+            c.feats.some((f) => f.fullText) ||
+            c.skills.some((s) => s.description) ||
+            c.spellcasting.some((sc) => sc.spells.some((sp) => sp.fullText));
+        if (!hasText) return;
+        try {
+            const copy = JSON.parse(JSON.stringify(c)) as PF1Character;
+            const added = moveRulesToCompendium(api, copy);
+            write(copy);
+            save();
+            console.info(`[pf1e-sheet] moved this sheet's rules text to the compendium (${added} new entries)`);
+        } catch (e) {
+            console.error("[pf1e-sheet] moving rules text to the compendium failed", e);
+        }
+    },
+    { immediate: true },
+);
+
+// --- Rule cards: the styled hover / click popover for skills, feats, spells and specials -----------
+// A card of the sheet's own (rather than the browser's plain title tooltip): the name, a details line
+// or two, and the rules text in paragraphs with "Benefit:"-style labels in bold. It follows the mouse
+// on hover; a click pins it, so long text can be scrolled, and offers PlanarAlly's compendium page
+// when the rule is registered there.
+
+interface RuleCard {
+    title: string;
+    meta: string[];
+    body: string;
+    rule?: { kind: RuleKind; name: string };
+}
+
+function skillCard(row: (typeof skillRows.value)[number]): RuleCard {
     const s = row.skill;
     const parts = [`ability ${fmt(row.abilityMod)}`, `ranks ${row.ranks}`, `misc ${fmt(row.misc)}`];
     if (row.temp !== undefined) parts.push(`temp ${fmt(row.temp)}`);
     const flags = [
-        s.classSkill ? "Class skill." : "",
-        s.trainedOnly ? "Trained only." : "",
-        s.armorCheck ? "Armor check penalty applies." : "",
+        s.classSkill ? "Class skill" : "",
+        s.trainedOnly ? "Trained only" : "",
+        s.armorCheck ? "Armor check penalty applies" : "",
     ].filter(Boolean);
-    return [
-        `${s.name} (${s.ability.toUpperCase()}) ${fmt(s.total)} = ${parts.join(", ")}`,
-        flags.join(" "),
-        s.situational ? `Situational: ${s.situational}` : "",
-        s.description ? `\n${s.description}` : "",
-    ]
-        .filter(Boolean)
-        .join("\n");
+    return {
+        title: `${s.name} (${s.ability.toUpperCase()}) ${fmt(s.total)}`,
+        meta: [`= ${parts.join(", ")}`, flags.join(" · "), s.situational ? `Situational: ${s.situational}` : ""].filter(
+            Boolean,
+        ),
+        body: s.description || ruleText("skill", s.name),
+        rule: { kind: "skill", name: s.name },
+    };
 }
 
-/** A feat's hover text: name and categories, then the full rules text. */
-function featTooltip(feat: FeatEntry): string {
-    const head = feat.category ? `${feat.name} [${feat.category}]` : feat.name;
-    const body = feat.fullText || feat.description;
-    return body ? `${head}\n\n${body}` : head;
+function featCard(feat: FeatEntry): RuleCard {
+    return {
+        title: feat.name,
+        meta: feat.category ? [feat.category] : [],
+        body: feat.fullText || ruleText("feat", feat.name) || feat.description,
+        rule: { kind: "feat", name: feat.name },
+    };
 }
 
-/** A special's hover text: name, Hero Lab's type and source, its uses if limited, then the rules text. */
-function specialTooltip(sp: SpecialEntry): string {
+function specialCard(sp: SpecialEntry): RuleCard {
     const resource = resourceForSpecial(sp);
     const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
         Boolean,
     );
-    const head = [sp.name, meta.join(" · ")].filter(Boolean).join("\n");
-    const body = sp.fullText || sp.description;
-    return body ? `${head}\n\n${body}` : head;
+    return { title: sp.name, meta: meta.length ? [meta.join(" · ")] : [], body: sp.fullText || sp.description };
+}
+
+function spellCard(spell: SpellEntry): RuleCard {
+    const meta = [
+        [`Level ${spell.level}`, spell.school ?? ""].filter(Boolean).join(" · "),
+        [spell.castTime, spell.range, spell.duration].filter(Boolean).join(" · "),
+        spell.dc ? `DC ${spell.dc}${spell.save ? ` (${spell.save})` : ""}` : "",
+    ].filter(Boolean);
+    return {
+        title: spell.name,
+        meta,
+        body: spellText(spell) || spell.description,
+        rule: { kind: "spell", name: spell.name },
+    };
+}
+
+/** A spell's full rules text: on the sheet (older imports or no compendium), else from the compendium. */
+function spellText(spell: SpellEntry): string {
+    return spell.fullText || ruleText("spell", spell.name);
+}
+
+const card = ref<(RuleCard & { x: number; y: number; pinned: boolean; note?: string }) | null>(null);
+let cardHideTimer: ReturnType<typeof setTimeout> | undefined;
+let cardShowTimer: ReturnType<typeof setTimeout> | undefined;
+
+// How long the mouse has to rest on a name before its card appears on hover (a click shows it at once).
+// Set on the Config tab; it is a preference of whoever is looking, so it is kept per browser like the
+// sheet width, not with the character.
+const CARD_DELAY_KEY = "pf1e-sheet-card-delay";
+const CARD_DELAY_DEFAULT_S = 2;
+const CARD_DELAY_MAX_S = 10;
+
+function loadCardDelay(): number {
+    try {
+        const saved = Number(localStorage.getItem(CARD_DELAY_KEY));
+        if (localStorage.getItem(CARD_DELAY_KEY) !== null && Number.isFinite(saved)) {
+            return Math.min(CARD_DELAY_MAX_S, Math.max(0, saved));
+        }
+    } catch {
+        /* storage unavailable: the default */
+    }
+    return CARD_DELAY_DEFAULT_S;
+}
+
+/** Seconds before a hover card appears. */
+const cardDelay = ref(loadCardDelay());
+
+function setCardDelay(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const value = input.valueAsNumber;
+    cardDelay.value = Number.isFinite(value) ? Math.min(CARD_DELAY_MAX_S, Math.max(0, value)) : CARD_DELAY_DEFAULT_S;
+    input.value = String(cardDelay.value);
+    try {
+        localStorage.setItem(CARD_DELAY_KEY, String(cardDelay.value));
+    } catch {
+        /* not remembered; applies for now anyway */
+    }
+}
+
+function showCard(c: RuleCard, event: MouseEvent): void {
+    if (card.value?.pinned) return;
+    clearTimeout(cardHideTimer);
+    clearTimeout(cardShowTimer);
+    const { clientX: x, clientY: y } = event;
+    // Moving from one name to the next while a card is already showing swaps it straight away.
+    if (card.value) {
+        card.value = { ...c, x, y, pinned: false };
+        return;
+    }
+    cardShowTimer = setTimeout(() => {
+        if (!card.value?.pinned) card.value = { ...c, x, y, pinned: false };
+    }, cardDelay.value * 1000);
+}
+
+function hideCard(): void {
+    clearTimeout(cardShowTimer);
+    if (!card.value || card.value.pinned) return;
+    clearTimeout(cardHideTimer);
+    // A short delay, so the mouse can move onto the card itself (to scroll it) without it vanishing.
+    cardHideTimer = setTimeout(() => {
+        if (card.value && !card.value.pinned) card.value = null;
+    }, 150);
+}
+
+function keepCard(): void {
+    clearTimeout(cardHideTimer);
+}
+
+/** A click pins the card - unless it was on a control (a Track checkbox, a button) inside the row. */
+function pinCard(c: RuleCard, event: MouseEvent): void {
+    if ((event.target as HTMLElement | null)?.closest("input, label, button")) return;
+    clearTimeout(cardHideTimer);
+    clearTimeout(cardShowTimer);
+    card.value = { ...c, x: event.clientX, y: event.clientY, pinned: true };
+}
+
+function closeCard(): void {
+    clearTimeout(cardShowTimer);
+    card.value = null;
+}
+
+onBeforeUnmount(() => {
+    clearTimeout(cardShowTimer);
+    clearTimeout(cardHideTimer);
+});
+
+const cardStyle = computed(() => {
+    const c = card.value;
+    if (!c) return {};
+    const width = Math.min(380, window.innerWidth - 16);
+    return {
+        width: `${width}px`,
+        left: `${Math.max(8, Math.min(c.x + 14, window.innerWidth - width - 8))}px`,
+        top: `${Math.max(8, Math.min(c.y + 14, window.innerHeight - 340))}px`,
+    };
+});
+
+const cardInCompendium = computed(() => {
+    const r = card.value?.rule;
+    return r !== undefined && ruleRegistered(r.kind, r.name);
+});
+
+async function openCardInCompendium(event: MouseEvent): Promise<void> {
+    const r = card.value?.rule;
+    if (!r) return;
+    const result = await openRule(api, r.kind, r.name, event);
+    if (result.ok) card.value = null;
+    else if (card.value) card.value.note = `Couldn't open it: ${result.reason}.`;
+}
+
+/** The card's paragraphs: split on blank lines (and before "Benefit:"-style lines), labels pulled out. */
+function cardParagraphs(text: string): { label: string; text: string }[] {
+    return text
+        .split(/\n\s*\n|\n(?=[A-Z][\w ()'/,-]{1,40}:\s)/)
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((p) => {
+            const m = /^([A-Z][\w ()'/,-]{1,40}):\s+/.exec(p);
+            return m ? { label: m[1]!, text: p.slice(m[0].length) } : { label: "", text: p };
+        });
 }
 
 const shownSkillRows = computed(() => {
@@ -1698,7 +1917,12 @@ function fmt(n: number): string {
                                     <td class="flags">
                                         <span v-if="row.skill.classSkill" title="Class skill">✓</span>
                                     </td>
-                                    <td class="skill-name" :title="skillTooltip(row)">
+                                    <td
+                                        class="skill-name"
+                                        @mouseenter="showCard(skillCard(row), $event)"
+                                        @mouseleave="hideCard"
+                                        @click="pinCard(skillCard(row), $event)"
+                                    >
                                         {{ row.skill.name }}
                                         <span v-if="row.skill.situational" class="flag" title="Situational modifier"
                                             >*</span
@@ -1902,10 +2126,16 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
             <ul class="feat-list">
-                <li v-for="(feat, i) of data.feats" :key="i" class="hover-info" :title="featTooltip(feat)">
+                <li
+                    v-for="(feat, i) of data.feats"
+                    :key="i"
+                    class="hover-info"
+                    @mouseenter="showCard(featCard(feat), $event)"
+                    @mouseleave="hideCard"
+                    @click="pinCard(featCard(feat), $event)"
+                >
                     <strong>{{ feat.name }}</strong>
                     <span v-if="feat.category" class="special-source">{{ feat.category }}</span>
-                    <span v-if="feat.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                     <div class="hint">{{ feat.description }}</div>
                 </li>
             </ul>
@@ -1913,9 +2143,10 @@ function fmt(n: number): string {
 
         <div v-else-if="activeTab === 'Spells'" class="pf1e-panel">
             <div class="readonly-note">
-                Tick <strong>Macro</strong> to add a spell to PlanarAlly's dice macros as "Cast &lt;spell&gt;". Its
-                formula is guessed from the spell's text at its caster level - edit it if needed (clear it to go back to
-                the guess). Spells without dice start empty.
+                Rest the mouse on a spell's name (or click it) for its rules text. Tick <strong>Macro</strong> to add a
+                spell to PlanarAlly's dice macros as "Cast &lt;spell&gt;". Its formula is guessed from the spell's text
+                at its caster level - edit it if needed (clear it to go back to the guess). Spells without dice start
+                empty.
                 <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
             </div>
             <div v-for="(sc, i) of data.spellcasting" :key="i" class="spell-class">
@@ -1929,25 +2160,38 @@ function fmt(n: number): string {
                         Lv{{ level }}: {{ slots === -1 ? "at will" : `${slots}/day` }}
                     </span>
                 </div>
-                <div v-for="group of spellsByLevel(sc.spells)" :key="group.level" class="spell-level-group">
+                <div v-for="group of spellsByLevel(castableSpells(sc))" :key="group.level" class="spell-level-group">
                     <h5>Level {{ group.level }}</h5>
                     <ul class="spell-rows">
                         <li v-for="spell of group.spells" :key="spell.name" class="spell-row">
                             <div class="spell-main">
-                                <strong>{{ spell.name }}</strong>
-                                <span
-                                    v-if="spell.fullText"
-                                    class="info-icon"
-                                    :title="spell.fullText"
-                                    aria-label="Full text"
-                                    >ⓘ</span
+                                <strong
+                                    class="hover-info"
+                                    @mouseenter="showCard(spellCard(spell), $event)"
+                                    @mouseleave="hideCard"
+                                    @click="pinCard(spellCard(spell), $event)"
+                                    >{{ spell.name }}</strong
                                 >
                                 <div class="spell-meta">
                                     <span v-if="spell.dc" :title="spell.save">DC {{ spell.dc }}</span>
                                     <span v-if="spell.range">{{ spell.range }}</span>
                                     <span v-if="spell.duration">{{ spell.duration }}</span>
+                                    <span
+                                        v-if="defensiveTotal(sc) !== undefined"
+                                        class="defensive"
+                                        :title="`Concentration check to cast defensively: 1d20 ${fmt(defensiveTotal(sc)!)} vs DC 15 + 2 × spell level${defensiveBonus(data) ? ' (includes Combat Casting +4)' : ''}`"
+                                    >
+                                        Defensive {{ fmt(defensiveTotal(sc)!) }} vs DC {{ defensiveDc(spell.level) }}
+                                        <button
+                                            type="button"
+                                            class="def-roll"
+                                            :disabled="rolling"
+                                            @click="rollDefensive(sc, spell)"
+                                        >
+                                            Roll
+                                        </button>
+                                    </span>
                                 </div>
-                                <div class="hint">{{ spell.description }}</div>
                             </div>
                             <div class="spell-controls">
                                 <label :title="`Show Cast ${spell.name} in PlanarAlly's dice macros`">
@@ -2062,7 +2306,14 @@ function fmt(n: number): string {
             <div v-for="group of groupSpecials(data.specials ?? [])" :key="group.category" class="special-group">
                 <h5>{{ group.category }}</h5>
                 <ul class="feat-list">
-                    <li v-for="sp of group.entries" :key="sp.name" class="hover-info" :title="specialTooltip(sp)">
+                    <li
+                        v-for="sp of group.entries"
+                        :key="sp.name"
+                        class="hover-info"
+                        @mouseenter="showCard(specialCard(sp), $event)"
+                        @mouseleave="hideCard"
+                        @click="pinCard(specialCard(sp), $event)"
+                    >
                         <label v-if="resourceForSpecial(sp)" class="track-toggle" title="Keep a tracker on the token">
                             <input
                                 type="checkbox"
@@ -2075,7 +2326,6 @@ function fmt(n: number): string {
                         </label>
                         <strong>{{ sp.name }}</strong>
                         <span v-if="sp.source" class="special-source">{{ sp.source }}</span>
-                        <span v-if="sp.fullText" class="info-icon" aria-hidden="true">ⓘ</span>
                         <div class="hint">{{ sp.description }}</div>
                     </li>
                 </ul>
@@ -2170,6 +2420,27 @@ function fmt(n: number): string {
                 </label>
             </div>
 
+            <h4>Rule cards</h4>
+            <div class="config-list">
+                <label>
+                    Show a rule card after hovering a skill, feat, spell or special for
+                    <input
+                        class="delay-input"
+                        type="number"
+                        min="0"
+                        :max="CARD_DELAY_MAX_S"
+                        step="0.5"
+                        :value="cardDelay"
+                        @change="setCardDelay"
+                    />
+                    seconds
+                </label>
+                <span class="hint"
+                    >0 shows it at once. Saved for this browser, for every sheet; clicking a name always shows its
+                    card.</span
+                >
+            </div>
+
             <h4>Tabs</h4>
             <div class="config-list">
                 <label v-for="tab of configTabs" :key="tab">
@@ -2213,6 +2484,45 @@ function fmt(n: number): string {
             </div>
             <textarea ref="diagTextarea" class="diag-output" readonly :value="diagOutput"></textarea>
         </div>
+
+        <Teleport to="body">
+            <div
+                v-if="card"
+                class="pf1e-rule-card"
+                :class="{ pinned: card.pinned }"
+                :style="cardStyle"
+                @mouseenter="keepCard"
+                @mouseleave="hideCard"
+            >
+                <div class="rc-head">
+                    <strong>{{ card.title }}</strong>
+                    <button v-if="card.pinned" type="button" title="Close" @click="closeCard">✕</button>
+                </div>
+                <div v-for="(m, i) of card.meta" :key="i" class="rc-meta">{{ m }}</div>
+                <div class="rc-body">
+                    <p v-for="(p, i) of cardParagraphs(card.body)" :key="i">
+                        <strong v-if="p.label">{{ p.label }}:</strong> {{ p.text }}
+                    </p>
+                    <p v-if="!card.body" class="rc-empty">No rules text in this import.</p>
+                </div>
+                <div class="rc-foot">
+                    <span v-if="card.note" class="rc-note">{{ card.note }}</span>
+                    <button
+                        v-if="card.pinned && card.rule && rulesReady"
+                        type="button"
+                        :title="
+                            cardInCompendium
+                                ? 'Open this rule\'s page in the compendium'
+                                : 'Not found in the compendium yet'
+                        "
+                        @click="openCardInCompendium"
+                    >
+                        Open in compendium
+                    </button>
+                    <span v-if="!card.pinned">Click to pin</span>
+                </div>
+            </div>
+        </Teleport>
     </div>
 </template>
 
@@ -2735,6 +3045,16 @@ function fmt(n: number): string {
             gap: 0 0.6rem;
             color: #555;
             font-size: 0.75rem;
+
+            .defensive {
+                white-space: nowrap;
+            }
+
+            .def-roll {
+                margin-left: 0.2rem;
+                padding: 0 0.3rem;
+                font-size: 0.7rem;
+            }
         }
 
         .spell-controls {
@@ -2785,6 +3105,11 @@ function fmt(n: number): string {
         .hint {
             color: #666;
             font-size: 0.75rem;
+        }
+
+        .delay-input {
+            width: 4rem;
+            margin: 0 0.25rem;
         }
     }
 
@@ -3014,6 +3339,99 @@ function fmt(n: number): string {
             text-transform: uppercase;
             letter-spacing: 0.03em;
         }
+    }
+}
+
+// The rule card is teleported to <body> (a dialog's transform would otherwise offset a fixed
+// position), so it is styled here, outside #pf1e-sheet, with every property it relies on set
+// explicitly against PlanarAlly's global styles.
+.pf1e-rule-card {
+    position: fixed;
+    z-index: 10000;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    max-height: 320px;
+    border: 2px solid #111;
+    border-radius: 0.6rem 0.6rem 0.2rem 0.2rem;
+    background: #fffdf5;
+    color: #111;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+    font-family: inherit;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    text-align: left;
+    pointer-events: auto;
+
+    .rc-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 0.45rem 0.45rem 0 0;
+        background: #111;
+        color: #fff;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+
+        strong {
+            flex: 1 1 auto;
+        }
+
+        button {
+            border: none;
+            background: none;
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+    }
+
+    .rc-meta {
+        padding: 0.15rem 0.6rem 0;
+        color: #444;
+        font-size: 0.72rem;
+        font-style: italic;
+    }
+
+    .rc-body {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 0.3rem 0.6rem;
+
+        p {
+            margin: 0 0 0.4rem;
+            white-space: pre-line;
+        }
+
+        .rc-empty {
+            color: #777;
+            font-style: italic;
+        }
+    }
+
+    .rc-foot {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.4rem;
+        padding: 0.2rem 0.6rem 0.3rem;
+        border-top: 1px solid #ddd;
+        color: #777;
+        font-size: 0.68rem;
+
+        &:empty {
+            display: none;
+        }
+
+        .rc-note {
+            flex: 1 1 auto;
+            color: #a00;
+        }
+    }
+
+    &.pinned {
+        border-color: #7a2940;
     }
 }
 </style>

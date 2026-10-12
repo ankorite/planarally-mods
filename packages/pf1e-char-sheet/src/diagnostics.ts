@@ -10,10 +10,13 @@
 // Neither report changes anything: no tracker, aura, Custom Data element or roll is created. The
 // API is handled as `unknown` throughout, so a change in PlanarAlly can't break this file.
 
+import type { GameApi } from "@planarally/mod-api";
+
 import { buildElements, CD_SOURCE } from "./customdata";
 import type { PF1Character } from "./data";
 import { trackedKeys } from "./resources";
 import { resolveFormula } from "./roll";
+import { rulesStatus } from "./rules";
 import { isHpTrackerName } from "./trackers";
 
 type Dict = Record<string, unknown>;
@@ -689,6 +692,11 @@ export async function buildHealthCheck(
             }
         }
         ok(`${good} of ${rolls.length} formulas resolve${engine === undefined ? "" : " and parse"}`);
+    });
+
+    await section("Rules text", () => {
+        ok(rulesStatus(api as GameApi));
+        ok(`this sheet's data: ${Math.round(JSON.stringify(character).length / 1024)} KB`);
     });
 
     await section("Trackers (x/day, x/round, spell slots)", () => {

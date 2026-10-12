@@ -103,6 +103,8 @@ export interface SheetNames {
      * attack is left out of the macros (the sheet then rolls `damage` directly).
      */
     attacks: { atk?: string; offsets: number[]; damage?: string; dmg?: string }[];
+    /** Spellcasting class name -> its "Concentration <class>" field, for concentration checks. */
+    concentration: Record<string, string>;
 }
 
 /**
@@ -166,11 +168,12 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
     add("/combat", "Max HP", "number", num(c.combat.hp.max));
     add("/combat", "Speed", "number", num(c.combat.speed));
 
+    const concentration: Record<string, string> = {};
     for (const sc of c.spellcasting) {
         const cls = baseClass(sc.className);
         if (!cls) continue;
         add("/combat", `CL ${cls}`, "number", num(sc.casterLevel));
-        add("/combat", `Concentration ${cls}`, "number", num(sc.concentration));
+        concentration[sc.className] = add("/combat", `Concentration ${cls}`, "number", num(sc.concentration));
     }
 
     const skills: string[] = [];
@@ -237,7 +240,7 @@ export function buildSheet(stored: PF1Character): { elements: CdElement[]; names
 
     return {
         elements: out,
-        names: { abilityMod, init, fort, ref: refl, will, cmb, skills, attacks },
+        names: { abilityMod, init, fort, ref: refl, will, cmb, skills, attacks, concentration },
     };
 }
 

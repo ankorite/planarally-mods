@@ -72,10 +72,15 @@ export function guessSpellFormula(text: string, cl: number): string {
     return `${count}d${die}${bonus === 0 ? "" : bonus > 0 ? `+${bonus}` : `${bonus}`}`;
 }
 
+/** The formula guessed for a spell: made at import, or from the text the sheet has (older imports). */
+export function spellGuess(sc: SpellcastingClass, spell: SpellEntry): string {
+    return spell.guess ?? guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+}
+
 /** The spell's macro formula: the one edited on the sheet, else the guess. */
 export function spellFormula(c: PF1Character, sc: SpellcastingClass, spell: SpellEntry): string {
     const edited = c.spellMacros?.formulas[spellKey(sc, spell)];
-    return edited ?? guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+    return edited ?? spellGuess(sc, spell);
 }
 
 /** The spells exported as dice macros, with their formulas, in sheet order. */
@@ -91,4 +96,14 @@ export function macroSpells(c: PF1Character): { name: string; formula: string }[
         }
     }
     return out;
+}
+
+/** The concentration DC to cast a spell defensively: 15 + twice the spell's level. */
+export function defensiveDc(level: number): number {
+    return 15 + 2 * Math.max(0, level);
+}
+
+/** Combat Casting's +4 on concentration checks to cast defensively (not in Hero Lab's concentration total). */
+export function defensiveBonus(c: Pick<PF1Character, "feats">): number {
+    return c.feats.some((f) => /^combat casting\b/i.test(f.name.trim())) ? 4 : 0;
 }

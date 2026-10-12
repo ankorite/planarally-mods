@@ -194,6 +194,11 @@ export interface SpellEntry {
     duration?: string;
     castTime?: string;
     school?: string;
+    /**
+     * The dice formula guessed from the full rules text at import, kept because that text may live in
+     * the compendium rather than on the sheet (rules.ts). Optional for older saves.
+     */
+    guess?: string;
 }
 
 export interface SpellcastingClass {

@@ -371,7 +371,13 @@ function parseSpells(character: Element, out: PF1Character): void {
             return cls !== "" && baseClassName.startsWith(cls);
         });
         mine.forEach((s) => claimed.add(s));
-        const spells = toSpells(mine);
+        // Only spells the character can cast now: Hero Lab also lists spells known above the highest
+        // level the class can cast yet (an oracle's whole cure line, Mass versions included). The cap is
+        // the spell class's maxspelllevel, or else the highest level it has slots for.
+        const maxAttr = attr(spellClass, "maxspelllevel");
+        const slotLevels = Object.keys(spellsPerDay).map(Number);
+        const maxLevel = maxAttr !== "" ? num(maxAttr) : slotLevels.length ? Math.max(...slotLevels) : Infinity;
+        const spells = toSpells(mine).filter((s) => s.level <= maxLevel);
 
         casting.push({
             className,
