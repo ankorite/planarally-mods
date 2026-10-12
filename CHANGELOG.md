@@ -5,7 +5,7 @@
 - pf1e-char-sheet v0.22.0-beta.4: on servers with the compendium (mod API 0.2), feat, spell and skill
   rules text is stored once per campaign (a room data block) and registered as the "PF1e (Hero Lab)"
   compendium book instead of on every sheet (about two thirds smaller); clicking those names opens
-  PlanarAlly's rule popover. Specials stay on the sheet. Uses `@planarally/mod-api` 0.2.0; older servers
+  their page in PlanarAlly's compendium, and their hover text is read from it. Specials stay on the sheet. Uses `@planarally/mod-api` 0.2.0; older servers
   keep the text on the sheet. Re-import a character to move its text
 
 ## [2026-10-09]

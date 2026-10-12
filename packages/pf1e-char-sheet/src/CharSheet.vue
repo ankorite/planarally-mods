@@ -1210,9 +1210,9 @@ function spellText(spell: SpellEntry): string {
     return spell.fullText || ruleText("spell", spell.name);
 }
 
-/** Clicking a feat, spell or skill name opens PlanarAlly's rule popover, when the rule is in its compendium. */
+/** Clicking a feat, spell or skill name opens its page in PlanarAlly's compendium, when it is there. */
 function showRule(kind: RuleKind, name: string, event: MouseEvent): void {
-    if (rulesReady.value) openRule(api, kind, name, event);
+    if (rulesReady.value) void openRule(api, kind, name, event);
 }
 
 const shownSkillRows = computed(() => {

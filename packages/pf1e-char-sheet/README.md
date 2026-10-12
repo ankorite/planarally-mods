@@ -179,7 +179,9 @@ and skills is stored **once per campaign** instead of on every token's sheet:
   school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
   the short excerpts, which cuts a typical character's sheet data by about two thirds.
 - Hover text on the sheet reads from the compendium, and clicking a feat, spell or skill name (dotted
-  underline) opens PlanarAlly's rule popover.
+  underline) opens its page in PlanarAlly's compendium panel. (The mod API can't navigate the panel, so
+  the sheet searches it for the name; should a PlanarAlly update change the panel, the click shows
+  PlanarAlly's rule popover instead.)
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
 - Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
 - A server without the compendium keeps the text on each sheet, as before. Characters imported before

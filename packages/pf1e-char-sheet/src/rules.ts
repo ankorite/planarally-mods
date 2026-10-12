@@ -1,5 +1,5 @@
 import type { CompendiumEntry, DataBlock, GameApi } from "@planarally/mod-api";
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 
 import type { PF1Character } from "./data";
 import { guessSpellFormula } from "./spells";
@@ -33,6 +33,27 @@ type RuleData = { entries: Record<string, CompendiumEntry> };
 let block: DataBlock<RuleData> | undefined;
 let unregister: (() => void) | undefined;
 let modTag = "pf1e-sheet";
+let gameApi: GameApi | undefined;
+
+/** PlanarAlly's compendium system (runtime only; the mod API types just `register`). */
+interface CompendiumSystem {
+    getEntry?: (ref: string) => { body?: string } | undefined;
+    openRuleAt?: (ref: string, x: number, y: number) => void;
+    toggle?: () => void;
+}
+
+function compendiumSystem(api: GameApi | undefined): CompendiumSystem | undefined {
+    return (api?.systems as unknown as Record<string, unknown> | undefined)?.["compendium"] as
+        | CompendiumSystem
+        | undefined;
+}
+
+function compendiumOpen(api: GameApi): boolean {
+    const state = (api.systemsState as unknown as Record<string, unknown>)["compendium"] as
+        | { reactive?: { open?: boolean } }
+        | undefined;
+    return state?.reactive?.open === true;
+}
 
 /** True once the rules block is loaded, i.e. rules text lives in the compendium (reactive, for the sheet). */
 export const rulesReady = ref(false);
@@ -68,6 +89,7 @@ function register(api: GameApi): void {
 /** Loads the campaign's rules block and registers it; call once from initGame. */
 export async function initRules(api: GameApi, tag: string | undefined): Promise<void> {
     if (tag) modTag = tag;
+    gameApi = api;
     if (!compendiumSupported(api)) return;
     try {
         block = await api.getOrLoadDataBlock<RuleData>(BLOCK, { defaultData: () => ({ entries: {} }) });
@@ -89,6 +111,7 @@ export function disposeRules(): void {
     unregister?.();
     unregister = undefined;
     block = undefined;
+    gameApi = undefined;
     rulesReady.value = false;
 }
 
@@ -101,14 +124,13 @@ export function rulesStatus(api: GameApi): string {
     return `compendium "${BOOK}": ${count("feat")} feats, ${count("spell")} spells, ${count("skill")} skills (${Math.round(JSON.stringify(block.data).length / 1024)} KB)`;
 }
 
-/** Whether rules text goes to the compendium (the block is loaded) rather than onto each sheet. */
-export function rulesInCompendium(): boolean {
-    return block !== undefined;
-}
-
-/** The full rules text of a feat, spell or skill from the campaign's rules block, if it is there. */
+/**
+ * The full rules text of a feat, spell or skill, read from PlanarAlly's compendium (the entry this mod
+ * registered); falls back to the campaign's rules block that feeds it, which is the same text.
+ */
 export function ruleText(kind: RuleKind, name: string): string {
-    return block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
+    const fromCompendium = compendiumSystem(gameApi)?.getEntry?.(ruleRef(kind, name))?.body;
+    return fromCompendium ?? block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
 }
 
 /** PlanarAlly's reference to a rule, for its rule popover and for chat links: "pf1e-sheet/feat-power-attack". */
@@ -117,16 +139,44 @@ export function ruleRef(kind: RuleKind, name: string): string {
 }
 
 /**
- * Opens PlanarAlly's own rule popover for a rule at the mouse position. Returns false when this server
- * can't (no compendium system, or the rule isn't registered), so the caller can do nothing instead.
+ * Opens a rule's page in PlanarAlly's compendium panel.
+ *
+ * The panel keeps its selected entry to itself and the mod API can't navigate it, so this opens the
+ * panel, types the rule's name into its search box and picks the "PF1e (Hero Lab)" result - what you
+ * would do by hand - then brings the panel to the front. If that doesn't work (a PlanarAlly version
+ * with a different panel), it shows PlanarAlly's rule popover at the mouse instead. Returns false when
+ * the rule isn't in the compendium at all.
  */
-export function openRule(api: GameApi, kind: RuleKind, name: string, event: MouseEvent): boolean {
-    const compendium = (api.systems as unknown as Record<string, unknown>)["compendium"] as
-        | { openRuleAt?: (ref: string, x: number, y: number) => void; getEntry?: (ref: string) => unknown }
-        | undefined;
+export async function openRule(api: GameApi, kind: RuleKind, name: string, event: MouseEvent): Promise<boolean> {
+    const compendium = compendiumSystem(api);
     const ref = ruleRef(kind, name);
-    if (typeof compendium?.openRuleAt !== "function" || !compendium.getEntry?.(ref)) return false;
-    compendium.openRuleAt(ref, event.clientX, event.clientY);
+    if (!compendium?.getEntry?.(ref)) return false;
+    const { clientX, clientY } = event;
+
+    try {
+        if (!compendiumOpen(api)) compendium.toggle?.();
+        await nextTick();
+        const panel = document.querySelector<HTMLElement>("#compendium");
+        const search = panel?.querySelector<HTMLInputElement>("input[type=search]");
+        if (panel && search) {
+            search.value = name;
+            search.dispatchEvent(new Event("input", { bubbles: true }));
+            await nextTick();
+            const hit = Array.from(panel.querySelectorAll<HTMLButtonElement>("#compendium-list button")).find(
+                (b) =>
+                    b.querySelector("span")?.textContent?.trim() === name &&
+                    (b.querySelector("small")?.textContent ?? "").includes(BOOK),
+            );
+            if (hit) {
+                hit.click();
+                panel.click(); // the panel's own click handler brings it in front of other dialogs
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn("[pf1e-sheet] couldn't open the compendium page", e);
+    }
+    compendium.openRuleAt?.(ref, clientX, clientY);
     return true;
 }
 
