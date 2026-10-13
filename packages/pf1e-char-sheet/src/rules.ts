@@ -8,13 +8,13 @@ import { guessSpellFormula } from "./spells";
 //
 // Hero Lab exports the full rules text of every feat, spell and skill with each character, so the same
 // "Power Attack" or "Cure Light Wounds" text used to be stored again in every token's sheet. On a server
-// with the compendium (mod API 0.2), the text is stored once per campaign instead - in a room DataBlock
+// with the compendium (mod API 0.2), the text is stored once per campaign instead - in room DataBlocks
 // every client loads - and registered as a "PF1e (Hero Lab)" book in PlanarAlly's compendium, where it
 // can be browsed, searched and linked from chat and notes. The sheet keeps only the short excerpt and
 // looks the full text up by kind and name.
 //
 // The compendium's `register` only lives in the browser for the session, which is why the text itself
-// is kept in the room block: each client registers the block's entries when the game loads, and again
+// is kept in the room blocks: each client registers their entries when the game loads, and again
 // whenever an import (on any client) adds some.
 //
 // Feats, spells and skills go there, and a character's specials (class features, racial traits, magic
@@ -25,16 +25,54 @@ import { guessSpellFormula } from "./spells";
 
 export type RuleKind = "feat" | "spell" | "skill" | "special";
 
-const BLOCK = { category: "room", name: "pf1e-rules" } as const;
 const BOOK = "PF1e (Hero Lab)";
 const PATHS: Record<RuleKind, string> = { feat: "Feats", spell: "Spells", skill: "Skills", special: "Specials" };
 
+// How the text is stored.
+//
+// A DataBlock is saved whole, and PlanarAlly only sends a save to the clients in the saver's map
+// location, so one block for the whole campaign could be overwritten by a client holding an older copy
+// (a player on another map, or two imports at once) - losing rules whose text had already been taken off
+// their sheets. So:
+//   * the rules are spread over SHARDS room blocks by a hash of their id, so a write only touches the
+//     few rules in one shard and two writes rarely meet;
+//   * text is only taken off a sheet once that rule is CONFIRMED on the server: it was in a block when
+//     the block was loaded from the server, or arrived in another client's save. A rule this client has
+//     just written stays on the sheet too until then (usually the next session), and an entry that did
+//     get lost is written again from the sheet that still has its text.
+// "pf1e-rules", the single block used before 1.0, is still read (never written), so its rules keep
+// working; the same rule in a shard wins.
+const SHARDS = 32;
+const LEGACY_BLOCK = { category: "room", name: "pf1e-rules" } as const;
+const shardRepr = (i: number) => ({ category: "room", name: `pf1e-rules-${String(i).padStart(2, "0")}` }) as const;
+
 type RuleData = { entries: Record<string, CompendiumEntry> };
 
-let block: DataBlock<RuleData> | undefined;
+let shards: DataBlock<RuleData>[] = [];
+let legacy: DataBlock<RuleData> | undefined;
+/** id -> rules text known to be on the server (see above). */
+const confirmed = new Map<string, string>();
+/** The data object each shard was last given by this client, to tell our writes from other clients'. */
+const ownWrites = new Map<number, RuleData>();
+const stopWatches: (() => void)[] = [];
 let unregister: (() => void) | undefined;
+let registerTimer: ReturnType<typeof setTimeout> | undefined;
 let modTag = "pf1e-sheet";
 let gameApi: GameApi | undefined;
+
+/** The shard a rule id lives in: a small FNV-1a hash, stable across clients and versions. */
+export function shardOf(id: string): number {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < id.length; i++) {
+        h ^= id.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h % SHARDS;
+}
+
+function confirmAll(data: RuleData | undefined): void {
+    for (const [id, entry] of Object.entries(data?.entries ?? {})) confirmed.set(id, entry.body);
+}
 
 /** PlanarAlly's compendium system (runtime only; the mod API types just `register`). */
 interface CompendiumSystem {
@@ -55,7 +93,7 @@ function compendiumSystem(api: GameApi | undefined): CompendiumSystem | undefine
     return (fromApi ?? fromWindow) as CompendiumSystem | undefined;
 }
 
-/** True once the rules block is loaded, i.e. rules text lives in the compendium (reactive, for the sheet). */
+/** True once the rules blocks are loaded, i.e. rules text lives in the compendium (reactive, for the sheet). */
 export const rulesReady = ref(false);
 
 /** Whether this server's mod API has the compendium. */
@@ -72,10 +110,23 @@ export function ruleId(kind: RuleKind, name: string): string {
     return `${kind}-${slug || "unnamed"}`;
 }
 
+/** This client's copy of a rule: from its shard, else from the pre-1.0 block. Reactive. */
+function localEntry(id: string): CompendiumEntry | undefined {
+    return shards[shardOf(id)]?.reactiveData.value.entries[id] ?? legacy?.reactiveData.value.entries[id] ?? undefined;
+}
+
+/** Every rule this client has: the pre-1.0 block's, overridden by the shards'. */
+function allEntries(): CompendiumEntry[] {
+    const byId = new Map<string, CompendiumEntry>();
+    for (const e of Object.values(legacy?.data.entries ?? {})) byId.set(e.id, e);
+    for (const shard of shards) for (const e of Object.values(shard.data.entries)) byId.set(e.id, e);
+    return [...byId.values()];
+}
+
 function register(api: GameApi): void {
     unregister?.();
     unregister = undefined;
-    const entries = Object.values(block?.data.entries ?? {});
+    const entries = allEntries();
     if (!entries.length) return;
     unregister = api.compendium.register(entries, {
         name: BOOK,
@@ -88,31 +139,63 @@ function register(api: GameApi): void {
     });
 }
 
-/** Loads the campaign's rules block and registers it; call once from initGame. */
+/** Re-registers once after a burst of changes (an import can touch several shards). */
+function registerSoon(api: GameApi): void {
+    clearTimeout(registerTimer);
+    registerTimer = setTimeout(() => register(api), 50);
+}
+
+/** Loads the campaign's rules blocks and registers them; call once from initGame. */
 export async function initRules(api: GameApi, tag: string | undefined): Promise<void> {
     if (tag) modTag = tag;
     gameApi = api;
     if (!compendiumSupported(api)) return;
     try {
-        block = await api.getOrLoadDataBlock<RuleData>(BLOCK, { defaultData: () => ({ entries: {} }) });
+        const loaded = await Promise.all(
+            Array.from({ length: SHARDS }, (_, i) =>
+                api.getOrLoadDataBlock<RuleData>(shardRepr(i), { defaultData: () => ({ entries: {} }) }),
+            ),
+        );
+        if (loaded.some((b) => !b)) throw new Error("a rules block didn't load");
+        shards = loaded as DataBlock<RuleData>[];
+        // Without defaultData, a missing block is simply undefined (and isn't created).
+        legacy = (await api.getOrLoadDataBlock<RuleData>(LEGACY_BLOCK)) ?? undefined;
     } catch (e) {
-        console.warn("[pf1e-sheet] couldn't load the rules block; rules text stays on each sheet", e);
+        console.warn("[pf1e-sheet] couldn't load the rules blocks; rules text stays on each sheet", e);
+        shards = [];
         return;
     }
-    if (!block) return;
+    // What came from the server is confirmed; blocks created here (not on the server yet) are empty.
+    shards.forEach((shard) => {
+        if (shard.existsOnServer) confirmAll(shard.data);
+    });
+    confirmAll(legacy?.data);
     rulesReady.value = true;
     register(api);
-    // Another client's import saves new entries into the block: register them here too.
-    watch(
-        () => Object.keys(block?.reactiveData.value.entries ?? {}).length,
-        () => register(api),
-    );
+    // Another client's save replaces a shard's data object (PlanarAlly's DataBlock.Saved / Created):
+    // confirm and register what it brought. This client's own writes are recognised and skipped.
+    shards.forEach((shard, i) => {
+        stopWatches.push(
+            watch(
+                () => shard.reactiveData.value,
+                (data) => {
+                    if (data !== ownWrites.get(i)) confirmAll(data);
+                    registerSoon(api);
+                },
+            ),
+        );
+    });
 }
 
 export function disposeRules(): void {
+    for (const stop of stopWatches.splice(0)) stop();
+    clearTimeout(registerTimer);
     unregister?.();
     unregister = undefined;
-    block = undefined;
+    shards = [];
+    legacy = undefined;
+    confirmed.clear();
+    ownWrites.clear();
     gameApi = undefined;
     rulesReady.value = false;
 }
@@ -120,10 +203,18 @@ export function disposeRules(): void {
 /** One line for the Diagnostics health check. */
 export function rulesStatus(api: GameApi): string {
     if (!compendiumSupported(api)) return "this server has no compendium: rules text is kept on each sheet";
-    if (!block) return "compendium present but the rules block isn't loaded: rules text is kept on each sheet";
-    const entries = Object.values(block.data.entries);
+    if (!shards.length)
+        return "compendium present but the rules blocks aren't loaded: rules text is kept on each sheet";
+    const entries = allEntries();
     const count = (kind: RuleKind) => entries.filter((e) => e.kind === kind).length;
-    return `compendium "${BOOK}": ${count("feat")} feats, ${count("spell")} spells, ${count("skill")} skills, ${count("special")} specials (${Math.round(JSON.stringify(block.data).length / 1024)} KB)`;
+    const size =
+        shards.reduce((n, b) => n + JSON.stringify(b.data).length, 0) + JSON.stringify(legacy?.data ?? {}).length;
+    const unconfirmed = entries.filter((e) => confirmed.get(e.id) !== e.body).length;
+    return (
+        `compendium "${BOOK}": ${count("feat")} feats, ${count("spell")} spells, ${count("skill")} skills, ` +
+        `${count("special")} specials (${Math.round(size / 1024)} KB in ${SHARDS} blocks${legacy ? " + the pre-1.0 block" : ""}); ` +
+        `${unconfirmed} not confirmed on the server yet (their text stays on the sheets until then)`
+    );
 }
 
 /**
@@ -145,14 +236,12 @@ function registeredRef(kind: RuleKind, name: string): string | undefined {
 export function ruleText(kind: RuleKind, name: string): string {
     const ref = registeredRef(kind, name);
     const fromCompendium = ref ? compendiumSystem(gameApi)?.getEntry?.(ref)?.body : undefined;
-    return fromCompendium ?? block?.reactiveData.value.entries[ruleId(kind, name)]?.body ?? "";
+    return fromCompendium ?? localEntry(ruleId(kind, name))?.body ?? "";
 }
 
 /** Whether a rule is in PlanarAlly's compendium (so its page can be opened): registered there, or in this mod's rules block, which is what gets registered. */
 export function ruleRegistered(kind: RuleKind, name: string): boolean {
-    return (
-        registeredRef(kind, name) !== undefined || block?.reactiveData.value.entries[ruleId(kind, name)] !== undefined
-    );
+    return registeredRef(kind, name) !== undefined || localEntry(ruleId(kind, name)) !== undefined;
 }
 
 /** PlanarAlly's reference to a rule, for its rule popover and for chat links: "pf1e-sheet/feat-power-attack". */
@@ -254,60 +343,75 @@ async function waitFor<T>(get: () => T | null | undefined): Promise<T | undefine
 }
 
 /**
- * On import: moves the full rules text of the character's feats, spells and skills into the campaign's
- * rules block (adding what isn't there yet) and strips it from the character, keeping the excerpts.
- * Each spell's dice formula is guessed first, while its full text is still at hand. Returns how many
- * entries were added; does nothing (and keeps the text on the sheet) without the compendium.
- * `withSpecials` moves the specials' text too - for characters, not for a monster's DM-only sheet.
+ * On import, and when an older sheet is opened: copies the full rules text of the character's feats,
+ * spells and skills (and, with `withSpecials`, specials - for characters, not a monster's DM-only sheet)
+ * into the campaign's rules blocks, adding or updating what they lack, and takes the text off the
+ * character only for rules already confirmed on the server (see the top of this file); the excerpts
+ * stay. Each spell's dice formula is guessed first, while its full text is still at hand. Returns how
+ * many rules were added and how many texts were taken off; does nothing without the compendium.
  */
-export function moveRulesToCompendium(api: GameApi, character: PF1Character, withSpecials: boolean): number {
+export function moveRulesToCompendium(
+    api: GameApi,
+    character: PF1Character,
+    withSpecials: boolean,
+): { added: number; stripped: number } {
     for (const sc of character.spellcasting) {
         for (const spell of sc.spells) {
-            spell.guess = guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
+            spell.guess ??= guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
         }
     }
-    if (!block) return 0;
+    if (!shards.length) return { added: 0, stripped: 0 };
 
-    const entries = { ...block.data.entries };
+    const pending = new Map<number, Record<string, CompendiumEntry>>();
     let added = 0;
-    let changed = false;
-    const put = (kind: RuleKind, name: string, body: string, group?: Record<string, string>): void => {
-        if (!name || !body) return;
+    let stripped = 0;
+    /** Stores the rule if needed; returns whether its text may come off the sheet. */
+    const put = (kind: RuleKind, name: string, body: string, group?: Record<string, string>): boolean => {
+        if (!name || !body) return false;
         const id = ruleId(kind, name);
-        if (entries[id]?.body === body) return;
-        if (!entries[id]) added++;
-        changed = true;
-        entries[id] = { id, name, kind, path: [PATHS[kind]], body, ...(group ? { group } : {}) };
+        const i = shardOf(id);
+        const current = pending.get(i)?.[id] ?? localEntry(id);
+        if (current?.body !== body) {
+            const entries = pending.get(i) ?? { ...shards[i]!.data.entries };
+            if (!current) added++;
+            entries[id] = { id, name, kind, path: [PATHS[kind]], body, ...(group ? { group } : {}) };
+            pending.set(i, entries);
+        }
+        if (confirmed.get(id) !== body) return false;
+        stripped++;
+        return true;
     };
 
     for (const feat of character.feats) {
-        put("feat", feat.name, feat.fullText, feat.category ? { category: feat.category } : undefined);
-        feat.fullText = "";
+        if (put("feat", feat.name, feat.fullText, feat.category ? { category: feat.category } : undefined)) {
+            feat.fullText = "";
+        }
     }
     for (const sc of character.spellcasting) {
         for (const spell of sc.spells) {
-            put("spell", spell.name, spell.fullText, spell.school ? { school: spell.school } : undefined);
-            spell.fullText = "";
+            if (put("spell", spell.name, spell.fullText, spell.school ? { school: spell.school } : undefined)) {
+                spell.fullText = "";
+            }
         }
     }
     for (const skill of character.skills) {
-        put("skill", skill.name, skill.description ?? "");
-        delete skill.description;
+        if (put("skill", skill.name, skill.description ?? "")) delete skill.description;
     }
     if (withSpecials) {
         for (const sp of character.specials ?? []) {
             const group: Record<string, string> = {};
             if (sp.category) group["category"] = sp.category;
             if (sp.source) group["source"] = sp.source;
-            put("special", sp.name, sp.fullText, Object.keys(group).length ? group : undefined);
-            sp.fullText = "";
+            if (put("special", sp.name, sp.fullText, Object.keys(group).length ? group : undefined)) sp.fullText = "";
         }
     }
 
-    if (changed) {
-        block.updateData({ entries });
-        block.sync();
-        register(api);
+    for (const [i, entries] of pending) {
+        const data = { entries };
+        ownWrites.set(i, data);
+        shards[i]!.updateData(data);
+        shards[i]!.sync();
     }
-    return added;
+    if (pending.size) registerSoon(api);
+    return { added, stripped };
 }

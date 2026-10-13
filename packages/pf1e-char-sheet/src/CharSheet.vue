@@ -464,7 +464,7 @@ async function onFileSelected(event: Event): Promise<void> {
         // The full rules text of feats, spells, skills (and a character's specials) goes to the campaign's compendium (once,
         // shared by every token) when the server has one; the sheet keeps the excerpts.
         try {
-            const added = moveRulesToCompendium(api, character, isCharacter.value);
+            const { added } = moveRulesToCompendium(api, character, isCharacter.value);
             if (added) notes.push(`Compendium: added ${added} rule${added === 1 ? "" : "s"} to "PF1e (Hero Lab)".`);
         } catch (e) {
             console.error("[pf1e-sheet] storing rules text in the compendium failed", e);
@@ -1207,9 +1207,10 @@ const skillRows = computed(() =>
     }),
 );
 
-// A sheet imported before the compendium (or on a server without one) still carries its feat, spell and
-// skill rules text. On a server with the compendium, move that text there the first time the sheet is
-// opened, as a re-import would - so older sheets shrink and their rules get compendium pages too.
+// A sheet can still carry feat, spell, skill (and special) rules text: imported before the compendium,
+// on a server without one, or with rules not yet confirmed on the server (rules.ts). Whenever it is
+// opened, the text goes to the compendium as a re-import would - adding any rule the compendium lacks -
+// and comes off the sheet once the server is known to have it. The sheet is only saved if that changed it.
 watch(
     () => [rulesReady.value, data.value] as const,
     ([ready, c]) => {
@@ -1221,11 +1222,15 @@ watch(
             (isCharacter.value && (c.specials ?? []).some((sp) => sp.fullText));
         if (!hasText) return;
         try {
-            const copy = JSON.parse(JSON.stringify(c)) as PF1Character;
-            const added = moveRulesToCompendium(api, copy, isCharacter.value);
+            const before = JSON.stringify(c);
+            const copy = JSON.parse(before) as PF1Character;
+            const { added, stripped } = moveRulesToCompendium(api, copy, isCharacter.value);
+            if (JSON.stringify(copy) === before) return;
             write(copy);
             save();
-            console.info(`[pf1e-sheet] moved this sheet's rules text to the compendium (${added} new entries)`);
+            console.info(
+                `[pf1e-sheet] rules text: ${added} rule(s) added to the compendium, ${stripped} text(s) moved off this sheet`,
+            );
         } catch (e) {
             console.error("[pf1e-sheet] moving rules text to the compendium failed", e);
         }
