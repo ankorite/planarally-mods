@@ -95,6 +95,7 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/adjustments.ts` — the built-in adjustments, PF1 stacking, and applying them to the character
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
+- `src/crits.ts` — the natural 20 / natural 1 animation, from PlanarAlly's dice history
 - `src/rules.ts` — feat, spell and skill rules text in a campaign room block and PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
@@ -166,6 +167,7 @@ The **Config** tab chooses what the sheet shows, per character; the choices are 
 - **Skills**: hide individual skills, or **Hide skills without ranks** in one go (**Show all skills** undoes it).
 - **Rule cards**: how many seconds to hover before a rule card appears (default 2; saved for this
   browser, for every sheet).
+- **Natural 20 / natural 1**: switch the animation off (or on) for this browser.
 - **Tabs**: hide tabs you don't use (Spells, Resources, Adjustments, Feats, Specials, Inventory, Token).
 
 A hidden weapon or skill is also left out of PlanarAlly's dice macros, since its **M** box is no longer on
@@ -181,21 +183,35 @@ duration and DC, a special's type, source and uses) and the rules text in paragr
 pins it, so long text can be scrolled. A pinned card for a feat, spell or skill that is in PlanarAlly's
 compendium has an **Open in compendium** button, which opens that rule's page in the compendium panel.
 
+## Natural 20 / natural 1
+
+Whenever a d20 comes up a natural 20 or a natural 1, a short animation plays over the map: a gold
+"NATURAL 20!" burst or a red, shaking "NATURAL 1", with who rolled and what (e.g. "Ulric · Attack: +3
+greatsword"). It never blocks clicks and is gone after about two seconds.
+
+- It works for every d20 roll the player sees: PlanarAlly's dice panel (2D, or 3D once the dice settle),
+  rolls other players share with them, and this sheet's own rolls - not just the sheet's. Only the
+  d20s that count: the lower die of a "keep highest" roll doesn't trigger it.
+- Each player sees it for the rolls that reach them, so a roll shared only with the DM shows for the
+  roller and the DM.
+- Switch it off for this browser on the Config tab. With the system's "reduce motion" setting it fades
+  in and out without bursting or shaking.
+
 ## Compendium
 
-On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells
-and skills is stored **once per campaign** instead of on every token's sheet:
+On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells,
+skills and a character's specials is stored **once per campaign** instead of on every token's sheet:
 
-- On import, any feat, spell or skill text the campaign doesn't have yet is saved in a shared room data
-  block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats, Spells by
-  school, Skills), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
-  the short excerpts, which cuts a typical character's sheet data by about two thirds.
+- On import, any feat, spell, skill or special text the campaign doesn't have yet is saved in a shared
+  room data block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats,
+  Spells by school, Skills, Specials by category or source), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
+  the short excerpts, which cuts a typical character's sheet data by about three quarters.
 - Characters imported before (or on a server without the compendium) move their text to the compendium
   the first time their sheet is opened, as a re-import would.
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
-- Specials stay on each sheet: a monster's own abilities never appear in the players' compendium.
-- A server without the compendium keeps the text on each sheet, as before. Characters imported before
-  this keep their text until they are re-imported.
+- A monster's or NPC's specials stay on its DM-only sheet, so its own abilities never appear in the
+  players' compendium (its feats, spells and skills are general rules and do go there).
+- A server without the compendium keeps the text on each sheet, as before.
 - The Diagnostics health check reports the compendium's size and this sheet's size.
 
 ## Monsters and NPCs

@@ -17,16 +17,17 @@ import { guessSpellFormula } from "./spells";
 // is kept in the room block: each client registers the block's entries when the game loads, and again
 // whenever an import (on any client) adds some.
 //
-// Only feats, spells and skills go there: general rules, the same for everyone. A creature's special
-// abilities stay on its own sheet, so a monster's abilities never show up in the players' compendium.
+// Feats, spells and skills go there, and a character's specials (class features, racial traits, magic
+// item abilities). A monster's or NPC's specials stay on its own DM-only sheet, so its abilities never
+// show up in the players' compendium.
 //
 // A server without the compendium keeps the text on each sheet, as before.
 
-export type RuleKind = "feat" | "spell" | "skill";
+export type RuleKind = "feat" | "spell" | "skill" | "special";
 
 const BLOCK = { category: "room", name: "pf1e-rules" } as const;
 const BOOK = "PF1e (Hero Lab)";
-const PATHS: Record<RuleKind, string> = { feat: "Feats", spell: "Spells", skill: "Skills" };
+const PATHS: Record<RuleKind, string> = { feat: "Feats", spell: "Spells", skill: "Skills", special: "Specials" };
 
 type RuleData = { entries: Record<string, CompendiumEntry> };
 
@@ -81,6 +82,8 @@ function register(api: GameApi): void {
         views: [
             { at: ["Spells"], name: "School", by: "school" },
             { at: ["Feats"], name: "Category", by: "category" },
+            { at: ["Specials"], name: "Category", by: "category" },
+            { at: ["Specials"], name: "Source", by: "source" },
         ],
     });
 }
@@ -120,7 +123,7 @@ export function rulesStatus(api: GameApi): string {
     if (!block) return "compendium present but the rules block isn't loaded: rules text is kept on each sheet";
     const entries = Object.values(block.data.entries);
     const count = (kind: RuleKind) => entries.filter((e) => e.kind === kind).length;
-    return `compendium "${BOOK}": ${count("feat")} feats, ${count("spell")} spells, ${count("skill")} skills (${Math.round(JSON.stringify(block.data).length / 1024)} KB)`;
+    return `compendium "${BOOK}": ${count("feat")} feats, ${count("spell")} spells, ${count("skill")} skills, ${count("special")} specials (${Math.round(JSON.stringify(block.data).length / 1024)} KB)`;
 }
 
 /**
@@ -255,8 +258,9 @@ async function waitFor<T>(get: () => T | null | undefined): Promise<T | undefine
  * rules block (adding what isn't there yet) and strips it from the character, keeping the excerpts.
  * Each spell's dice formula is guessed first, while its full text is still at hand. Returns how many
  * entries were added; does nothing (and keeps the text on the sheet) without the compendium.
+ * `withSpecials` moves the specials' text too - for characters, not for a monster's DM-only sheet.
  */
-export function moveRulesToCompendium(api: GameApi, character: PF1Character): number {
+export function moveRulesToCompendium(api: GameApi, character: PF1Character, withSpecials: boolean): number {
     for (const sc of character.spellcasting) {
         for (const spell of sc.spells) {
             spell.guess = guessSpellFormula(spell.fullText || spell.description, sc.casterLevel);
@@ -289,6 +293,15 @@ export function moveRulesToCompendium(api: GameApi, character: PF1Character): nu
     for (const skill of character.skills) {
         put("skill", skill.name, skill.description ?? "");
         delete skill.description;
+    }
+    if (withSpecials) {
+        for (const sp of character.specials ?? []) {
+            const group: Record<string, string> = {};
+            if (sp.category) group["category"] = sp.category;
+            if (sp.source) group["source"] = sp.source;
+            put("special", sp.name, sp.fullText, Object.keys(group).length ? group : undefined);
+            sp.fullText = "";
+        }
     }
 
     if (changed) {

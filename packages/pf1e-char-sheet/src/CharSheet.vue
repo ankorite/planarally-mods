@@ -12,6 +12,7 @@ import {
     TARGET_LABELS,
 } from "./adjustments";
 import { syncAuras } from "./auras";
+import { critFxEnabled, naturalOf, playCrit, setCritFxEnabled } from "./crits";
 import {
     attackFormula,
     buildElements,
@@ -460,10 +461,10 @@ async function onFileSelected(event: Event): Promise<void> {
             }
         }
 
-        // The full rules text of feats, spells and skills goes to the campaign's compendium (once,
+        // The full rules text of feats, spells, skills (and a character's specials) goes to the campaign's compendium (once,
         // shared by every token) when the server has one; the sheet keeps the excerpts.
         try {
-            const added = moveRulesToCompendium(api, character);
+            const added = moveRulesToCompendium(api, character, isCharacter.value);
             if (added) notes.push(`Compendium: added ${added} rule${added === 1 ? "" : "s"} to "PF1e (Hero Lab)".`);
         } catch (e) {
             console.error("[pf1e-sheet] storing rules text in the compendium failed", e);
@@ -971,6 +972,12 @@ async function doRoll(label: string, formula: string): Promise<void> {
         }
         rollStatus.value = `Rolling ${label}...`;
         const out = await rollFormula(api, formula, { label, useNativeUi: showResultCard.value, shape });
+        // With the result card on, the roll goes into PA's history and crits.ts sees it there; without
+        // it, nothing else will, so check for a natural 20 / 1 here.
+        if (!showResultCard.value) {
+            const natural = naturalOf(out.roll);
+            if (natural) playCrit(natural, "", label);
+        }
         return (
             `${label}: ${out.total} (${out.breakdown}) = ${out.formula}` +
             (out.notes.length ? ` - ${out.notes.join("; ")}` : "")
@@ -1210,11 +1217,12 @@ watch(
         const hasText =
             c.feats.some((f) => f.fullText) ||
             c.skills.some((s) => s.description) ||
-            c.spellcasting.some((sc) => sc.spells.some((sp) => sp.fullText));
+            c.spellcasting.some((sc) => sc.spells.some((sp) => sp.fullText)) ||
+            (isCharacter.value && (c.specials ?? []).some((sp) => sp.fullText));
         if (!hasText) return;
         try {
             const copy = JSON.parse(JSON.stringify(c)) as PF1Character;
-            const added = moveRulesToCompendium(api, copy);
+            const added = moveRulesToCompendium(api, copy, isCharacter.value);
             write(copy);
             save();
             console.info(`[pf1e-sheet] moved this sheet's rules text to the compendium (${added} new entries)`);
@@ -1271,7 +1279,13 @@ function specialCard(sp: SpecialEntry): RuleCard {
     const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
         Boolean,
     );
-    return { title: sp.name, meta: meta.length ? [meta.join(" · ")] : [], body: sp.fullText || sp.description };
+    return {
+        title: sp.name,
+        meta: meta.length ? [meta.join(" · ")] : [],
+        body: sp.fullText || ruleText("special", sp.name) || sp.description,
+        // A monster's specials stay on its sheet, not in the compendium.
+        rule: isCharacter.value ? { kind: "special", name: sp.name } : undefined,
+    };
 }
 
 function spellCard(spell: SpellEntry): RuleCard {
@@ -1314,6 +1328,14 @@ function loadCardDelay(): number {
         /* storage unavailable: the default */
     }
     return CARD_DELAY_DEFAULT_S;
+}
+
+/** Whether this browser plays the natural 20 / 1 animation (Config tab). */
+const critFx = ref(critFxEnabled());
+function setCritFx(on: boolean): void {
+    critFx.value = on;
+    setCritFxEnabled(on);
+    if (on) playCrit("nat20", "Preview", "this is how a natural 20 looks");
 }
 
 /** Seconds before a hover card appears. */
@@ -2438,6 +2460,22 @@ function fmt(n: number): string {
                 <span class="hint"
                     >0 shows it at once. Saved for this browser, for every sheet; clicking a name always shows its
                     card.</span
+                >
+            </div>
+
+            <h4>Natural 20 / natural 1</h4>
+            <div class="config-list">
+                <label>
+                    <input
+                        type="checkbox"
+                        :checked="critFx"
+                        @change="setCritFx(($event.target as HTMLInputElement).checked)"
+                    />
+                    Play an animation when any d20 roll comes up a natural 20 or a natural 1
+                </label>
+                <span class="hint"
+                    >Any d20 roll you see - the dice panel, rolls shared with you, this sheet's rolls. Saved for this
+                    browser.</span
                 >
             </div>
 
