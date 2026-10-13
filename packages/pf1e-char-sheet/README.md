@@ -8,15 +8,10 @@ Hero Lab is the source of truth: the sheet is read-only except for current HP. E
 Hero Lab, re-export and re-import to update the sheet, and only adjust current HP in PlanarAlly
 during play.
 
-## Beta
-
-This is a beta: it is in use at real tables but needs wider testing. Please report what breaks.
-
-### Installing
+## Installing
 
 1. Download `pf1e-char-sheet-<version>.pam` from the latest release on the
-   [Releases page](https://github.com/ankorite/planarally-mods/releases) (betas are marked
-   "Pre-release").
+   [Releases page](https://github.com/ankorite/planarally-mods/releases).
 2. In PlanarAlly, open DM Settings → Mod and upload the `.pam`.
 3. To update, upload the newer `.pam` the same way. Sheets already imported keep their data.
 
@@ -26,7 +21,7 @@ Requirements:
 - Hero Lab Classic, exporting with File > Custom Output > Export XML. Export with Hero Lab's own
   adjustments switched off and use the sheet's Adjustments tab instead, or they count twice.
 
-### Reporting a bug
+## Reporting a bug
 
 Open an issue on [GitHub](https://github.com/ankorite/planarally-mods/issues) with:
 
@@ -36,9 +31,12 @@ Open an issue on [GitHub](https://github.com/ankorite/planarally-mods/issues) wi
 - anything in the browser console (F12) starting with `[pf1e-sheet]`;
 - if an import went wrong, the Hero Lab XML (or the part of it that matters).
 
-### Known limitations
+## Known limitations
 
 - Hero Lab is the only import source; there is no manual entry beyond current HP and the toggles.
+- Adjustments cover the common PF1 rules (bonus stacking, max Dex from armor, 1.5x Strength for
+  two-handed weapons, Constitution to max HP) but not every special case, e.g. off-hand weapons or
+  natural attacks' secondary Strength.
 - Spell formulas for macros are guessed from the spell's text; check them on the Spells tab.
 - Re-importing keeps current HP (still full if it was full, otherwise capped at the new maximum).
 - Duplicate token relies on PlanarAlly's Ctrl+C / Ctrl+V, so it replaces PlanarAlly's shape clipboard.
@@ -59,19 +57,31 @@ pnpm zip pf1e-char-sheet
 
 Upload the resulting `.pam` from `dist-zip/` in DM Settings → Mod.
 
+### Checks and tests
+
+```zsh
+pnpm -F '@planarally/pf1e-char-sheet' lint:ci
+pnpm -F '@planarally/pf1e-char-sheet' format:ci
+pnpm -F '@planarally/pf1e-char-sheet' test
+```
+
+The unit tests (Vitest, in `src/__tests__/`) cover the Hero Lab parser, the adjustments, the shared
+rules storage, resources, spell formulas, nat 20/1 detection and the update check.
+`.github/workflows/ci-pf1e.yml` runs these, and builds every mod, on every pull request.
+
 ### Releasing
 
-`.github/workflows/release-pf1e.yml` builds the mod and publishes a GitHub release with the `.pam`
-attached when a tag `pf1e-v<version>` is pushed. A version with a `-` (`0.22.0-beta.1`) becomes a
-pre-release.
+`.github/workflows/release-pf1e.yml` checks, tests and builds the mod and publishes a GitHub release
+with the `.pam` attached when a tag `pf1e-v<version>` is pushed. A plain version (`1.0.1`) is a normal
+release; one with a `-` (`1.1.0-beta.1`) is published as a pre-release.
 
 1. Set the version in `mod.toml` and `package.json`, add it to the root `CHANGELOG.md`, and merge to
    `main` (the update check reads `main`'s `mod.toml`).
 2. Tag that commit and push the tag:
 
     ```zsh
-    git tag pf1e-v0.22.0-beta.1
-    git push origin pf1e-v0.22.0-beta.1
+    git tag pf1e-v1.0.0
+    git push origin pf1e-v1.0.0
     ```
 
 The workflow refuses a tag that doesn't match the version in `mod.toml`.
@@ -202,17 +212,23 @@ greatsword"). It never blocks clicks and is gone after about two seconds.
 On a PlanarAlly server with the compendium (mod API 0.2 or later), the full rules text of feats, spells,
 skills and a character's specials is stored **once per campaign** instead of on every token's sheet:
 
-- On import, any feat, spell, skill or special text the campaign doesn't have yet is saved in a shared
-  room data block and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats,
-  Spells by school, Skills, Specials by category or source), where it can be browsed, searched and linked from chat and notes. The sheet keeps only
-  the short excerpts, which cuts a typical character's sheet data by about three quarters.
-- Characters imported before (or on a server without the compendium) move their text to the compendium
-  the first time their sheet is opened, as a re-import would.
+- On import, any feat, spell, skill or special text the campaign doesn't have yet is saved in shared
+  room data blocks and registered in PlanarAlly's compendium as the **PF1e (Hero Lab)** book (Feats,
+  Spells by school, Skills, Specials by category or source), where it can be browsed, searched and
+  linked from chat and notes.
+- The text comes off a sheet once the server is known to have it: from the next session (or as soon as
+  another player's save brings it). Until then the sheet keeps it, so nothing can be lost. A typical
+  character's sheet data ends up about three quarters smaller.
+- Older sheets, and sheets whose text is still on them, are moved the same way whenever they are
+  opened; a rule the compendium lost is written back from a sheet that still has its text.
+- The rules are spread over 32 small blocks, so two players saving at once rarely touch the same one.
+  (Rules stored by the 0.22 betas in a single block are still read.)
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
 - A monster's or NPC's specials stay on its DM-only sheet, so its own abilities never appear in the
   players' compendium (its feats, spells and skills are general rules and do go there).
 - A server without the compendium keeps the text on each sheet, as before.
-- The Diagnostics health check reports the compendium's size and this sheet's size.
+- The Diagnostics health check reports the compendium's size, how many rules aren't confirmed on the
+  server yet, and this sheet's size.
 
 ## Monsters and NPCs
 

@@ -1,0 +1,38 @@
+name: Check pf1e-char-sheet
+
+# Runs on every pull request and push to main: builds every mod (so a shared change can't break the
+# others) and checks the PF1e sheet's lint, formatting and unit tests.
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+              with:
+                  version: 10
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - run: pnpm install --frozen-lockfile
+
+            - name: Build every mod
+              run: pnpm -r build
+
+            - name: Lint, format check and tests
+              run: |
+                  pnpm -F '@planarally/pf1e-char-sheet' lint:ci
+                  pnpm -F '@planarally/pf1e-char-sheet' format:ci
+                  pnpm -F '@planarally/pf1e-char-sheet' test

@@ -316,6 +316,16 @@ export function leadingDamage(text: string): { formula: string; rest: string } |
 }
 
 /**
+ * The character's hit dice: from Hero Lab's "7 HD; 4d8+3d10+32", else the sum of its class levels.
+ * Mythic tiers aren't hit dice.
+ */
+export function hitDice(c: Pick<PF1Character, "identity" | "classes">): number {
+    const m = /(\d+)\s*HD\b/i.exec(c.identity.hitDice ?? "");
+    if (m) return Number(m[1]);
+    return c.classes.reduce((n, cls) => n + (Number.isFinite(cls.level) ? cls.level : 0), 0);
+}
+
+/**
  * The character with its enabled adjustments applied. Returns the character itself (not a copy)
  * when nothing is enabled. Current HP is never touched: it belongs to the tracker.
  */
@@ -335,13 +345,24 @@ export function applyAdjustments(c: PF1Character): PF1Character {
         modDelta[k] = abilityModifier(after) - abilityModifier(before);
     }
 
-    // AC, per bonus type so each lands on the right AC values.
+    // AC, per bonus type so each lands on the right AC values. A Dex change only counts up to the armor's
+    // maximum Dex bonus (Hero Lab's "Max Dex Bonus" penalty), as Hero Lab's own AC does.
     const acEffects = forTargets(effects, "ac");
     const acBy = (keep: (t: BonusType) => boolean): number => stackEffects(acEffects.filter((e) => keep(e.type)));
     const ac = acBy(() => true);
-    out.combat.ac.normal += ac + modDelta.dex;
-    out.combat.ac.touch += acBy((t) => !NOT_TOUCH.has(t)) + modDelta.dex;
-    out.combat.ac.flatFooted += acBy((t) => !NOT_FLAT_FOOTED.has(t)) + Math.min(0, modDelta.dex);
+    const maxDex = c.combat.maxDex;
+    const dexToAc = (score: number): number => {
+        const mod = abilityModifier(score);
+        return maxDex === undefined ? mod : Math.min(mod, maxDex);
+    };
+    const acDex = dexToAc(out.abilities.dex) - dexToAc(c.abilities.dex);
+    out.combat.ac.normal += ac + acDex;
+    out.combat.ac.touch += acBy((t) => !NOT_TOUCH.has(t)) + acDex;
+    out.combat.ac.flatFooted += acBy((t) => !NOT_FLAT_FOOTED.has(t)) + Math.min(0, acDex);
+
+    // Max HP follows a Constitution change: the change in modifier for every hit die. (Current HP is the
+    // tracker's and isn't touched.)
+    out.combat.hp.max += modDelta.con * hitDice(c);
 
     // Saves.
     const save = (k: "fort" | "ref" | "will", ability: AbilityKey): number =>
@@ -356,7 +377,14 @@ export function applyAdjustments(c: PF1Character): PF1Character {
     // Attacks and combat maneuvers.
     const meleeAttack = stackEffects(forTargets(effects, "attack", "meleeAttack")) + modDelta.str;
     const rangedAttack = stackEffects(forTargets(effects, "attack", "rangedAttack")) + modDelta.dex;
-    const meleeDamage = stackEffects(forTargets(effects, "damage", "meleeDamage")) + modDelta.str;
+    const meleeDamage = stackEffects(forTargets(effects, "damage", "meleeDamage"));
+    // Strength to damage: 1x, or 1.5x a bonus for a two-handed weapon (a penalty is never multiplied).
+    const strToDamage = (score: number, twoHanded: boolean): number => {
+        const mod = abilityModifier(score);
+        return twoHanded && mod > 0 ? Math.floor(mod * 1.5) : mod;
+    };
+    const strDamage = (twoHanded: boolean): number =>
+        strToDamage(out.abilities.str, twoHanded) - strToDamage(c.abilities.str, twoHanded);
     const rangedDamage = stackEffects(forTargets(effects, "damage"));
     out.combat.cmb += meleeAttack;
     out.combat.cmd +=
@@ -367,7 +395,7 @@ export function applyAdjustments(c: PF1Character): PF1Character {
     for (const atk of out.combat.attacks) {
         const ranged = atk.kind === "ranged";
         atk.bonus = adjustAttackBonus(atk.bonus, ranged ? rangedAttack : meleeAttack, extraAttack);
-        atk.damage = adjustDamage(atk.damage, ranged ? rangedDamage : meleeDamage);
+        atk.damage = adjustDamage(atk.damage, ranged ? rangedDamage : meleeDamage + strDamage(atk.twoHanded === true));
     }
 
     // Skills.

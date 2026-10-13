@@ -1,6 +1,6 @@
 {
     "name": "@planarally/pf1e-char-sheet",
-    "version": "0.22.0-beta.5",
+    "version": "1.0.0",
     "private": true,
     "license": "MIT",
     "files": [
@@ -22,7 +22,8 @@
         "format": "oxfmt",
         "format:ci": "oxfmt --check",
         "lint": "oxlint --fix --type-aware",
-        "lint:ci": "oxlint --type-aware --deny-warnings"
+        "lint:ci": "oxlint --type-aware --deny-warnings",
+        "test": "vitest run"
     },
     "dependencies": {
         "@planarally/mod-api": "^0.4.0",
@@ -32,8 +33,10 @@
         "@types/node": "^24.0.5",
         "@vitejs/plugin-vue": "^6.0.9",
         "@vue/tsconfig": "^0.9.1",
+        "happy-dom": "^21.0.1",
         "sass-embedded": "^1.105.1",
         "vite": "^8.3.2",
+        "vitest": "^5.0.4",
         "vue-tsc": "^3.3.12"
     }
 }

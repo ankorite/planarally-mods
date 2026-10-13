@@ -2,15 +2,18 @@
 apiSchema = "0.1.0"
 tag = "pf1e-sheet"
 name = "Pathfinder 1e Character Sheet"
-version = "0.22.0-beta.5"
+version = "1.0.0"
 author = "Ankorite"
-shortDescription = "A Pathfinder 1e character sheet with Hero Lab import (beta)"
+shortDescription = "A Pathfinder 1e character sheet with Hero Lab import"
 
 description = """
-Adds a Pathfinder 1st Edition character sheet tab to shapes marked as characters.
+A Pathfinder 1st Edition character sheet for PlanarAlly, imported from a Hero Lab XML export
+(File > Custom Output > Export XML).
 
-Supports importing a character directly from a Hero Lab XML export (File > Custom Output > Export XML)
-to populate abilities, combat stats, skills, feats and spells automatically.
-
-For the DM, tokens that aren't characters get a limited monster / NPC sheet, imported the same way.
+- A paper-style sheet with Hero Lab's breakdowns, roll buttons and PlanarAlly dice macros
+- Spells with dice formulas and casting defensively, and limited-use resources kept in step with
+  token trackers
+- Buffs and conditions with PF1 stacking, rule cards on hover, and the rules text in PlanarAlly's
+  compendium
+- A natural 20 / natural 1 animation, a Config tab, and a limited sheet for the DM's monsters and NPCs
 """

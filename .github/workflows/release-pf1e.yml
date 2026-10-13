@@ -39,10 +39,11 @@ jobs:
 
             - run: pnpm install --frozen-lockfile
 
-            - name: Lint, format check and build
+            - name: Lint, format check, tests and build
               run: |
                   pnpm -F '@planarally/pf1e-char-sheet' lint:ci
                   pnpm -F '@planarally/pf1e-char-sheet' format:ci
+                  pnpm -F '@planarally/pf1e-char-sheet' test
                   pnpm -F '@planarally/pf1e-char-sheet' build
 
             - run: pnpm zip pf1e-char-sheet
