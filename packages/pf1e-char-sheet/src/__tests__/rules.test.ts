@@ -127,7 +127,10 @@ describe("rules storage", () => {
         const shardName = `pf1e-rules-${String(shardOf("feat-power-attack")).padStart(2, "0")}`;
         expect(JSON.parse(server.get(shardName)!).entries["feat-power-attack"].body).toBe("Power Attack full text");
 
-        // Opening it again in the same session changes nothing (no confirmation, nothing to write).
+        // Opening it again in the same session changes nothing (no confirmation, nothing to write) - even
+        // after the shards' watchers have seen this client's own write.
+        await nextTick();
+        await new Promise((r) => setTimeout(r, 80));
         const again = moveRulesToCompendium(s1.api, c, true);
         expect(again).toEqual({ added: 0, stripped: 0 });
         disposeRules();

@@ -1,5 +1,5 @@
 import type { CompendiumEntry, DataBlock, GameApi } from "@planarally/mod-api";
-import { nextTick, ref, watch } from "vue";
+import { nextTick, ref, toRaw, watch } from "vue";
 
 import type { PF1Character } from "./data";
 import { guessSpellFormula } from "./spells";
@@ -179,7 +179,8 @@ export async function initRules(api: GameApi, tag: string | undefined): Promise<
             watch(
                 () => shard.reactiveData.value,
                 (data) => {
-                    if (data !== ownWrites.get(i)) confirmAll(data);
+                    // The watcher sees Vue's reactive proxy of the data; compare the object underneath.
+                    if (toRaw(data) !== ownWrites.get(i)) confirmAll(data);
                     registerSoon(api);
                 },
             ),

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [2026-10-13]
+
+- pf1e-char-sheet v1.0.0, the first stable release:
+    - safer shared rules storage: the compendium's rules text is spread over 32 room blocks, and text
+      only comes off a sheet once the server is known to have that rule, so a client with an older
+      copy (another map location, or two imports at once) can no longer lose it; a lost rule is written
+      back from a sheet that still has it. Rules stored by the 0.22 betas are still read
+    - the rules blocks' watchers re-register on any change and are stopped when the mod unloads
+    - adjustments: a Dex change only adds to AC up to the armor's max Dex bonus, two-handed weapons get
+      1.5x a Strength bonus to damage, and a Constitution change raises max HP by hit dice
+    - unit tests (Vitest) for the parser, adjustments, rules storage, resources, spells, nat 20/1
+      detection and the update check, and a pull-request check (`ci-pf1e.yml`) that builds every mod
+      and runs the sheet's lint, format check and tests
+    - out of beta: version 1.0.0, README and mod description updated
+
 ## [2026-10-12]
 
 - pf1e-char-sheet v0.22.0-beta.5:
