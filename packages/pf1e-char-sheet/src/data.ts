@@ -148,6 +148,8 @@ export interface AttackEntry {
      * because characters imported before this existed lack it (treated as melee).
      */
     kind?: "melee" | "ranged";
+    /** Wielded in both hands (Hero Lab's equipped="bothhands"): 1.5x Strength to damage. Optional. */
+    twoHanded?: boolean;
 }
 
 export interface SkillEntry {

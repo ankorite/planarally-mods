@@ -281,6 +281,7 @@ function parseCombat(character: Element, out: PF1Character): void {
             range: attr(own(weapon, "rangedattack"), "rangeinctext") || attr(weapon, "rangeinctext"),
             notes: "",
             kind,
+            twoHanded: attr(weapon, "equipped") === "bothhands",
         });
     const attacks: AttackEntry[] = [
         ...ownAll(own(character, "melee"), "weapon").map(toAttack("melee")),
