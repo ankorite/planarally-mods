@@ -226,6 +226,11 @@ skills and a character's specials is stored **once per campaign** instead of on 
   character's sheet data ends up about three quarters smaller.
 - Older sheets, and sheets whose text is still on them, are moved the same way whenever they are
   opened; a rule the compendium lost is written back from a sheet that still has its text.
+- A special is stored under its name without what changes as the character levels: "Trap Sense +2
+  (Ex)" and "Trap Sense +3 (Ex)" are both **Trap Sense**, so a level-up doesn't add another entry. Two
+  different texts with the same short name get their source added ("Mutagen (Investigator)"). Sheets
+  from 1.0 move their specials to the short names when opened; the old full-name entries are kept but
+  no longer listed once the same text is under the short name.
 - The rules are spread over 32 small blocks, so two players saving at once rarely touch the same one.
   (Rules stored by the 0.22 betas in a single block are still read.)
 - Every client registers the book when the game loads, and again when anyone's import adds rules.

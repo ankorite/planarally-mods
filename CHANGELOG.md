@@ -2,7 +2,14 @@
 
 ## [2026-10-16]
 
-- pf1e-char-sheet v1.1.0:
+- pf1e-char-sheet v1.1.0-beta.1:
+    - one compendium entry per special across level-ups: specials are stored under their name without
+      the per-level part ("Trap Sense +2 (Ex)" -> "Trap Sense"); different texts with the same short
+      name get their source added. 1.0 sheets move over when opened, and the old full-name entries stop
+      being listed once their text is under the short name (they're kept, so nothing breaks)
+    - CharSheet.vue is being split up: the Adjustments, Feats, Inventory, Config and Diagnostics tabs and
+      the rule card are now components in `src/sheet/`, sharing the sheet through `context.ts`, and the
+      styles moved to `src/sheet/sheet.scss`
     - mutagens and cognatogens from the Hero Lab export become adjustments ("From Hero Lab" on the
       Adjustments tab). One that was active in the export (its penalty already shows in the scores)
       starts ticked and is taken out of the numbers when unticked; the guess can be corrected on the tab
