@@ -73,6 +73,24 @@ describe("adjustments", () => {
         expect(out.combat.attacks[0]!.bonus).toBe("+15/+10");
     });
 
+    it("moves a finesse weapon with Dex, not Str", () => {
+        const c = emptyCharacter();
+        c.abilities = { ...c.abilities, str: 8, dex: 20 };
+        const rapier = { name: "Rapier", bonus: "+12", damage: "1d6+5", critical: "", damageType: "P", notes: "" };
+        c.combat.attacks = [
+            { ...rapier, kind: "melee", finesse: true, dexDamage: true },
+            { ...rapier, name: "Dagger", kind: "melee", finesse: true },
+        ];
+        const out = adjusted(c, [
+            { target: "dex", type: "alchemical", value: 4 },
+            { target: "str", type: "enhancement", value: 4 },
+        ]);
+        expect(out.combat.attacks.map((a) => `${a.bonus} ${a.damage}`)).toEqual(["+14 1d6+7", "+14 1d6+7"]);
+        // The dagger's damage still follows Str (+2); the rapier's follows Dex (+2) instead.
+        const dexOnly = adjusted(c, [{ target: "dex", type: "alchemical", value: 4 }]);
+        expect(dexOnly.combat.attacks.map((a) => `${a.bonus} ${a.damage}`)).toEqual(["+14 1d6+7", "+14 1d6+5"]);
+    });
+
     it("raises max HP with Constitution by hit dice, leaving current HP alone", () => {
         const c = emptyCharacter();
         c.identity.hitDice = "7 HD; 4d8+3d10+32";
@@ -84,6 +102,41 @@ describe("adjustments", () => {
         expect(
             hitDice({ identity: { ...c.identity, hitDice: "" }, classes: [{ name: "A", level: 3, archetypes: [] }] }),
         ).toBe(3);
+    });
+
+    it("takes a mutagen that was active in the export back out when it's switched off", () => {
+        const c = emptyCharacter();
+        c.abilities = { ...c.abilities, dex: 28, wis: 11 }; // with the mutagen
+        c.combat.ac = { normal: 35, touch: 20, flatFooted: 26 };
+        c.combat.initiative = 9;
+        c.importedAdjustments = [
+            {
+                key: "hl:m",
+                name: "Mutagen (+4 Dex, -2 Wis, +2 Nat AC)",
+                effects: [
+                    { target: "dex", type: "alchemical", value: 4 },
+                    { target: "wis", type: "untyped", value: -2 },
+                    { target: "ac", type: "natural", value: 2 },
+                ],
+                inExport: true,
+            },
+        ];
+        // Still on: nothing changes.
+        c.adjustments = { enabled: ["hl:m"], custom: [] };
+        const on = applyAdjustments(c);
+        expect(on.abilities).toEqual(c.abilities);
+        expect(on.combat.ac).toEqual(c.combat.ac);
+        // Switched off: Dex 24, Wis 13, 2 less natural armor and 2 less Dex to AC.
+        c.adjustments = { enabled: [], custom: [] };
+        const off = applyAdjustments(c);
+        expect(off.abilities).toMatchObject({ dex: 24, wis: 13 });
+        expect(off.combat.ac).toEqual({ normal: 31, touch: 18, flatFooted: 24 });
+        expect(off.combat.initiative).toBe(7);
+        // A mutagen that wasn't active adds its effect when switched on.
+        c.importedAdjustments[0]!.inExport = false;
+        expect(applyAdjustments(c)).toBe(c);
+        c.adjustments = { enabled: ["hl:m"], custom: [] };
+        expect(applyAdjustments(c).abilities).toMatchObject({ dex: 32, wis: 9 });
     });
 
     it("finds the leading damage dice", () => {

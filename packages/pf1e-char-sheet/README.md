@@ -94,7 +94,11 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
 - `src/CharSheet.vue` — the sheet UI (Sheet / Spells / Resources / Adjustments / Feats / Specials /
   Inventory / Token / Config tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token / Config
-  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources)
+  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources). Being
+  split up: the Adjustments, Feats, Inventory, Config and Diagnostics tabs and the rule card are already
+  components in `src/sheet/`
+- `src/sheet/` — the sheet's components, the context they share with `CharSheet.vue`
+  (`context.ts`, provide / inject), the rule cards (`ruleCards.ts`) and the sheet's styles (`sheet.scss`)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -106,7 +110,8 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
 - `src/crits.ts` — the natural 20 / natural 1 animation, from PlanarAlly's dice history
-- `src/rules.ts` — feat, spell and skill rules text in a campaign room block and PlanarAlly's compendium
+- `src/rules.ts` — rules text of feats, spells, skills and specials in the campaign's room blocks and
+  PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
@@ -221,6 +226,11 @@ skills and a character's specials is stored **once per campaign** instead of on 
   character's sheet data ends up about three quarters smaller.
 - Older sheets, and sheets whose text is still on them, are moved the same way whenever they are
   opened; a rule the compendium lost is written back from a sheet that still has its text.
+- A special is stored under its name without what changes as the character levels: "Trap Sense +2
+  (Ex)" and "Trap Sense +3 (Ex)" are both **Trap Sense**, so a level-up doesn't add another entry. Two
+  different texts with the same short name get their source added ("Mutagen (Investigator)"). Sheets
+  from 1.0 move their specials to the short names when opened; the old full-name entries are kept but
+  no longer listed once the same text is under the short name.
 - The rules are spread over 32 small blocks, so two players saving at once rarely touch the same one.
   (Rules stored by the 0.22 betas in a single block are still read.)
 - Every client registers the book when the game loads, and again when anyone's import adds rules.
@@ -264,9 +274,20 @@ Lab's own adjustments can't be read from its XML export (only their combined res
 so **export from Hero Lab with its adjustments switched off** and switch them on here instead,
 otherwise they count twice.
 
+- **From Hero Lab:** mutagens and cognatogens. Hero Lab has an alchemist or investigator add each
+  brewed mutagen as an item ("Mutagen: +4 Dex, -2 Wis, +2 Nat AC"), and each one becomes an adjustment
+  here: an alchemical bonus to the ability, the penalty, and natural armor. Hero Lab doesn't say whether
+  it was drunk when the file was exported, so the sheet looks at the scores: if the mutagen's penalty
+  is already in them (Wis 13 showing as 11), it counts the mutagen as active in the export, already
+  in the numbers, and starts it ticked. Untick it when it wears off and the sheet takes it back out.
+  If the guess is wrong, fix it with the mutagen's **active in the export** box. Ticking a mutagen
+  drinks a dose: it uses one of the mutagen's uses on the Resources tab (and its tracker, if tracked);
+  unticking it gives nothing back. With no doses left it still switches on, and says so.
+  An investigator's **Studied Combat** is here too, from its special ("Studied Combat (+3, 4 rounds)"):
+  +3 insight on melee attacks and +3 on melee damage. It starts off.
 - **Built-in:** Bless, Prayer, Haste, Heroism, Greater Heroism, Good Hope, Divine Favor (+1), Shield
   of Faith (+2), Holy Aura, Mage Armor, Shield, Barkskin (+2), the six ability buffs (Bull's Strength,
-  Cat's Grace, ...), Enlarge Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting
+  Cat's Grace, ...), Enlarge Person, Reduce Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting
   Defensively, Shaken, Sickened and Fatigued.
 - **Custom:** a name and one or more effects (amount, bonus type, what it changes: an ability score,
   attack, melee or ranged attack, damage, AC, saves, skills, initiative, CMD or speed). New ones are
@@ -278,7 +299,9 @@ Bonuses follow PF1 stacking: same-type bonuses don't stack (only the highest cou
 circumstance and untyped bonuses do, and penalties always add up. AC bonuses land on touch and
 flat-footed AC by type (armor, shield and natural don't apply to touch AC; dodge doesn't apply when
 flat-footed). An ability change carries through to what it feeds: Str to melee attack, melee damage,
-CMB, CMD and Str skills; Dex to ranged attack, AC, Reflex, initiative, CMD and Dex skills; Con to Fort;
+CMB, CMD and Str skills (a finesse weapon attacks with Dex instead, and adds Dex to damage with Fencing
+Grace, Slashing Grace, Dervish Dance or the agile property - the sheet works out which weapons from Hero
+Lab's attack and damage numbers); Dex to ranged attack, AC, Reflex, initiative, CMD and Dex skills; Con to Fort;
 Wis to Will; and every ability to its skills. Haste adds one extra attack at the highest bonus.
 
 The choices are stored with the character, shared with the table and kept when you re-import.
