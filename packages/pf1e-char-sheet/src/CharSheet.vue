@@ -385,6 +385,15 @@ async function onFileSelected(event: Event): Promise<void> {
         character.adjustments = JSON.parse(
             JSON.stringify(data.value.adjustments ?? { enabled: [], custom: [] }),
         ) as AdjustmentState;
+        // A mutagen new to this sheet starts as Hero Lab had it (on if it was active in the export, as its
+        // effect is already in the numbers); one the sheet already knew keeps the table's choice.
+        const knownImported = new Set((data.value.importedAdjustments ?? []).map((a) => a.key));
+        for (const adj of character.importedAdjustments ?? []) {
+            if (knownImported.has(adj.key)) continue;
+            const adjState = character.adjustments;
+            adjState.enabled = adjState.enabled.filter((k) => k !== adj.key);
+            if (adj.inExport) adjState.enabled.push(adj.key);
+        }
         // And the spells picked as dice macros (with any edited formulas), for spells still there.
         const spellKeys = new Set(character.spellcasting.flatMap((sc) => sc.spells.map((s) => spellKey(sc, s))));
         const prevSpellMacros = data.value.spellMacros ?? { enabled: [], formulas: {} };
@@ -645,6 +654,14 @@ function hideSkillsWithoutRanks(hide: boolean): void {
 const configTabs = computed(() =>
     (isCharacter.value ? BASE_TABS : LIMITED_TABS).filter((t) => HIDEABLE_TABS.includes(t)),
 );
+
+/** Says whether the export's numbers already include a mutagen (when the guess at import was wrong). */
+function setInExport(key: string, inExport: boolean): void {
+    const adj = data.value.importedAdjustments?.find((a) => a.key === key);
+    if (!adj) return;
+    adj.inExport = inExport;
+    saveAndReexport(`${adj.name}: ${inExport ? "counted as in" : "counted as not in"} the Hero Lab numbers.`);
+}
 
 function toggleAdjustment(key: string, name: string, on: boolean): void {
     const state = adjustmentState();
@@ -2104,6 +2121,33 @@ function fmt(n: number): string {
                 <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
             </div>
 
+            <template v-if="data.importedAdjustments?.length">
+                <h4>From Hero Lab</h4>
+                <div class="readonly-note">
+                    Mutagens from the export. One that was active in Hero Lab is already in the imported numbers: leave
+                    it ticked while it lasts, and untick it when it wears off.
+                </div>
+                <div class="adjustment-list">
+                    <div v-for="adj of data.importedAdjustments" :key="adj.key" class="adjustment">
+                        <input
+                            type="checkbox"
+                            :checked="isAdjustmentOn(adj.key)"
+                            @change="toggleAdjustment(adj.key, adj.name, ($event.target as HTMLInputElement).checked)"
+                        />
+                        <span class="adj-name">{{ adj.name }}</span>
+                        <span class="adj-effects">{{ describeEffects(adj.effects) }}</span>
+                        <label class="adj-in-export">
+                            <input
+                                type="checkbox"
+                                :checked="adj.inExport"
+                                @change="setInExport(adj.key, ($event.target as HTMLInputElement).checked)"
+                            />
+                            active in the export
+                        </label>
+                    </div>
+                </div>
+            </template>
+
             <template v-for="g of adjustmentGroups" :key="g.group">
                 <h4>{{ g.group }}</h4>
                 <div class="adjustment-list">
@@ -2198,6 +2242,9 @@ function fmt(n: number): string {
                                     @mouseleave="hideCard"
                                     @click="pinCard(spellCard(spell), $event)"
                                     >{{ spell.name }}</strong
+                                >
+                                <span v-if="spell.count" class="spell-count" title="Copies prepared"
+                                    >×{{ spell.count }}</span
                                 >
                                 <div class="spell-meta">
                                     <span v-if="spell.dc" :title="spell.save">DC {{ spell.dc }}</span>
@@ -3061,6 +3108,19 @@ function fmt(n: number): string {
             color: #555;
             font-size: 0.75rem;
         }
+
+        .adj-in-export {
+            flex: 0 0 auto;
+            color: #555;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+    }
+
+    .spell-count {
+        margin-left: 0.3rem;
+        color: #555;
+        font-size: 0.8rem;
     }
 
     .spell-rows {

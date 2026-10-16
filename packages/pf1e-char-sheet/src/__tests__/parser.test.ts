@@ -5,7 +5,7 @@ import { HeroLabImportError, parseHeroLabXml } from "../herolab/parser";
 // A small hand-written Hero Lab export in the shape of a real one (document > public > character), with
 // made-up text. It covers the parts the parser has had to learn: the mythic tier that only shows in the
 // class summary, spells known above the castable level, a range ability outside <auras>, a two-handed
-// weapon, and a minion whose stats must never mix into the character's.
+// weapon, mutagens (one active in the export, one not), a spell prepared twice, and a minion whose stats must never mix into the character's.
 const XML = `<?xml version="1.0" encoding="UTF-8"?>
 <document><public><character name="Testa Brightblade">
   <race name="half-elf"/><alignment name="Lawful Good"/><deity name="Sarenrae"/>
@@ -23,7 +23,7 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
     <attribute name="Dexterity"><attrvalue base="12" modified="12"/></attribute>
     <attribute name="Constitution"><attrvalue base="14" modified="16"/></attribute>
     <attribute name="Intelligence"><attrvalue base="12" modified="12"/></attribute>
-    <attribute name="Wisdom"><attrvalue base="7" modified="7"/></attribute>
+    <attribute name="Wisdom"><attrvalue base="9" modified="7"/></attribute>
     <attribute name="Charisma"><attrvalue base="17" modified="21"/></attribute>
   </attributes>
   <saves>
@@ -40,13 +40,14 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
   <attack baseattack="+6" meleeattack="+10/+5" rangedattack="+7/+2"/>
   <melee>
     <weapon name="+3 greatsword" attack="+13/+8" crit="19-20/x2" damage="2d6+9" typetext="S" equipped="bothhands"/>
+    <weapon name="Rapier" attack="+8/+3" crit="18-20/x2" damage="1d6+1" typetext="P"/>
   </melee>
   <ranged/>
   <skills>
     <skill name="Diplomacy" ranks="2" attrbonus="5" attrname="CHA" value="+12" classskill="yes"><description>Talk well.</description><situationalmodifiers text=""/></skill>
     <skill name="Climb" ranks="0" attrbonus="4" attrname="STR" value="-1" armorcheck="yes"><description>Climb things.</description><situationalmodifiers text=""/></skill>
   </skills>
-  <feats><feat name="Extra Lay on Hands" categorytext="Class"><description>More healing.</description></feat></feats>
+  <feats><feat name="Extra Lay on Hands" categorytext="Class"><description>More healing.</description></feat><feat name="Fencing Grace"/></feats>
   <trackedresources>
     <trackedresource name="Smite Evil (1/day) (Su)" used="0" max="1"/>
     <trackedresource name="Wand of Healing (50 charges)" used="10" max="50"/>
@@ -59,7 +60,9 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
     <spell name="Cure Light Wounds" level="1" class="Oracle" dc="16"><description>cures 1d8 points of damage + 1 point per caster level (maximum +5).</description></spell>
     <spell name="Cure Serious Wounds" level="3" class="Oracle"><description>Too high to cast yet.</description></spell>
   </spellsknown>
-  <spellsmemorized/>
+  <spellsmemorized><spell name="Cure Light Wounds (x2)" level="1" class="Oracle"/></spellsmemorized>
+  <magicitems><item name="Mutagen: +4 Str, -2 Int, +2 Nat AC" quantity="1"/></magicitems>
+  <gear><item name="Cognatogen: +4 Cha, -2 Wis, +2 Nat AC" quantity="1"/></gear>
   <spellclasses>
     <spellclass name="Oracle (Dual-Cursed Oracle)" maxspelllevel="2" spells="Spontaneous">
       <spelllevel level="0" unlimited="yes"/><spelllevel level="1" maxcasts="8"/><spelllevel level="2" maxcasts="4"/>
@@ -111,11 +114,15 @@ describe("Hero Lab parser", () => {
             damage: "2d6+9",
             twoHanded: true,
         });
+        expect(c.combat.attacks[0]!.finesse).toBeUndefined();
+        // +8 is nearer the ranged base attack (+7, Dex) than the melee one (+10, Str): a finesse weapon.
+        expect(c.combat.attacks[1]).toMatchObject({ name: "Rapier", finesse: true, dexDamage: true });
     });
 
     it("lists only spells the class can cast now", () => {
         const oracle = c.spellcasting.find((s) => s.className.startsWith("Oracle"))!;
         expect(oracle.spells.map((s) => s.name)).toEqual(["Cure Light Wounds"]);
+        expect(oracle.spells[0]).toMatchObject({ count: 2, prepared: true });
         expect(oracle.concentration).toBe(11);
         expect(oracle.spellsPerDay).toEqual({ 0: -1, 1: 8, 2: 4 });
     });
@@ -125,6 +132,22 @@ describe("Hero Lab parser", () => {
             expect.arrayContaining(["Smite Evil (1/day) (Su)", "Wand of Healing (50 charges)"]),
         );
         expect(c.auras?.map((a) => `${a.name} ${a.radius}`)).toEqual(["Aura of Courage 10", "Life Link 140"]);
+    });
+
+    it("reads mutagens, and whether each was active in the export", () => {
+        expect(c.importedAdjustments).toEqual([
+            {
+                key: "hl:mutagen-4-str-2-int-2-nat-ac",
+                name: "Mutagen (+4 Str, -2 Int, +2 Nat AC)",
+                effects: [
+                    { target: "str", type: "alchemical", value: 4 },
+                    { target: "int", type: "untyped", value: -2 },
+                    { target: "ac", type: "natural", value: 2 },
+                ],
+                inExport: false, // Int isn't lowered
+            },
+            expect.objectContaining({ name: "Cognatogen (+4 Cha, -2 Wis, +2 Nat AC)", inExport: true }), // Wis 9 -> 7
+        ]);
     });
 
     it("keeps skill rules text for the rule cards", () => {

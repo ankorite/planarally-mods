@@ -264,9 +264,16 @@ Lab's own adjustments can't be read from its XML export (only their combined res
 so **export from Hero Lab with its adjustments switched off** and switch them on here instead,
 otherwise they count twice.
 
+- **From Hero Lab:** mutagens and cognatogens. Hero Lab has an alchemist or investigator add each
+  brewed mutagen as an item ("Mutagen: +4 Dex, -2 Wis, +2 Nat AC"), and each one becomes an adjustment
+  here: an alchemical bonus to the ability, the penalty, and natural armor. Hero Lab doesn't say whether
+  it was drunk when the file was exported, so the sheet looks at the scores: if the mutagen's penalty
+  is already in them (Wis 13 showing as 11), it counts the mutagen as active in the export, already
+  in the numbers, and starts it ticked. Untick it when it wears off and the sheet takes it back out.
+  If the guess is wrong, fix it with the mutagen's **active in the export** box.
 - **Built-in:** Bless, Prayer, Haste, Heroism, Greater Heroism, Good Hope, Divine Favor (+1), Shield
   of Faith (+2), Holy Aura, Mage Armor, Shield, Barkskin (+2), the six ability buffs (Bull's Strength,
-  Cat's Grace, ...), Enlarge Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting
+  Cat's Grace, ...), Enlarge Person, Reduce Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting
   Defensively, Shaken, Sickened and Fatigued.
 - **Custom:** a name and one or more effects (amount, bonus type, what it changes: an ability score,
   attack, melee or ranged attack, damage, AC, saves, skills, initiative, CMD or speed). New ones are
@@ -278,7 +285,9 @@ Bonuses follow PF1 stacking: same-type bonuses don't stack (only the highest cou
 circumstance and untyped bonuses do, and penalties always add up. AC bonuses land on touch and
 flat-footed AC by type (armor, shield and natural don't apply to touch AC; dodge doesn't apply when
 flat-footed). An ability change carries through to what it feeds: Str to melee attack, melee damage,
-CMB, CMD and Str skills; Dex to ranged attack, AC, Reflex, initiative, CMD and Dex skills; Con to Fort;
+CMB, CMD and Str skills (a finesse weapon attacks with Dex instead, and adds Dex to damage with Fencing
+Grace, Slashing Grace, Dervish Dance or the agile property - the sheet works out which weapons from Hero
+Lab's attack and damage numbers); Dex to ranged attack, AC, Reflex, initiative, CMD and Dex skills; Con to Fort;
 Wis to Will; and every ability to its skills. Haste adds one extra attack at the highest bonus.
 
 The choices are stored with the character, shared with the table and kept when you re-import.

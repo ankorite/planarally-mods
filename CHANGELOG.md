@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## [2026-10-16]
+
+- pf1e-char-sheet v1.1.0:
+    - mutagens and cognatogens from the Hero Lab export become adjustments ("From Hero Lab" on the
+      Adjustments tab). One that was active in the export (its penalty already shows in the scores)
+      starts ticked and is taken out of the numbers when unticked; the guess can be corrected on the tab
+    - finesse weapons: a melee weapon that Hero Lab's numbers show attacking with Dex follows Dex
+      adjustments, and adds Dex to damage with Fencing Grace, Slashing Grace, Dervish Dance or agile
+    - Reduce Person built-in adjustment
+    - a spell prepared more than once ("Cat's Grace (x2)") is listed once with its count, so its rule
+      card and compendium entry are the spell's own
+    - fix: a lower Dex no longer lowers flat-footed AC while its modifier stays positive
+
 ## [2026-10-13]
 
 - pf1e-char-sheet v1.0.0, the first stable release:
