@@ -70,15 +70,17 @@ export interface CustomAdjustment {
 
 /**
  * An adjustment read from the Hero Lab export rather than picked from the built-in list: an alchemist's
- * or investigator's mutagen ("Mutagen: +4 Dex, -2 Wis, +2 Nat AC"). `inExport` says whether Hero Lab
- * had it active, so its effect is already in the imported numbers: then switching it off on the sheet
- * takes it out of them, and switching it on adds nothing.
+ * or investigator's mutagen ("Mutagen: +4 Dex, -2 Wis, +2 Nat AC"), or an investigator's Studied Combat.
+ * `inExport` says whether Hero Lab had it active, so its effect is already in the imported numbers:
+ * then switching it off on the sheet takes it out of them, and switching it on adds nothing.
  */
 export interface ImportedAdjustment {
     key: string;
     name: string;
     effects: AdjustmentEffect[];
     inExport: boolean;
+    /** The resource a use of it spends (the mutagen's own tracked resource): switching it on uses one. */
+    resource?: string;
 }
 
 export interface AdjustmentState {

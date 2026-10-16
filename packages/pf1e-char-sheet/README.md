@@ -270,7 +270,11 @@ otherwise they count twice.
   it was drunk when the file was exported, so the sheet looks at the scores: if the mutagen's penalty
   is already in them (Wis 13 showing as 11), it counts the mutagen as active in the export, already
   in the numbers, and starts it ticked. Untick it when it wears off and the sheet takes it back out.
-  If the guess is wrong, fix it with the mutagen's **active in the export** box.
+  If the guess is wrong, fix it with the mutagen's **active in the export** box. Ticking a mutagen
+  drinks a dose: it uses one of the mutagen's uses on the Resources tab (and its tracker, if tracked);
+  unticking it gives nothing back. With no doses left it still switches on, and says so.
+  An investigator's **Studied Combat** is here too, from its special ("Studied Combat (+3, 4 rounds)"):
+  +3 insight on melee attacks and +3 on melee damage. It starts off.
 - **Built-in:** Bless, Prayer, Haste, Heroism, Greater Heroism, Good Hope, Divine Favor (+1), Shield
   of Faith (+2), Holy Aura, Mage Armor, Shield, Barkskin (+2), the six ability buffs (Bull's Strength,
   Cat's Grace, ...), Enlarge Person, Reduce Person, Inspire Courage +1 to +4, Rage, Flanking, Charging, Fighting

@@ -6,6 +6,9 @@
     - mutagens and cognatogens from the Hero Lab export become adjustments ("From Hero Lab" on the
       Adjustments tab). One that was active in the export (its penalty already shows in the scores)
       starts ticked and is taken out of the numbers when unticked; the guess can be corrected on the tab
+    - ticking a mutagen drinks a dose: one use of its resource on the Resources tab (and its tracker)
+    - an investigator's Studied Combat becomes an adjustment too: insight bonus on melee attacks and a
+      bonus on melee damage, from its special
     - finesse weapons: a melee weapon that Hero Lab's numbers show attacking with Dex follows Dex
       adjustments, and adds Dex to damage with Fencing Grace, Slashing Grace, Dervish Dance or agile
     - Reduce Person built-in adjustment

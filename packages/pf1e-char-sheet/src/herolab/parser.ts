@@ -132,6 +132,7 @@ export function parseHeroLabXml(xmlText: string): PF1Character {
     parseResources(character, result);
     parseAuras(character, result);
     parseSpecials(character, result);
+    parseStudiedCombat(result);
 
     result.importedAt = new Date().toISOString();
 
@@ -505,6 +506,14 @@ function toSpell(s: Element): SpellEntry {
  * The key drops the parenthesised part, so "(20 rounds/day)" becoming "(22 rounds/day)" on a
  * level-up still updates the same tracker.
  */
+/** A tracked resource's key: the name without its parenthesised part, so "(3/day)" -> "(4/day)" keeps it. */
+function resourceKey(name: string): string {
+    return `res:${name
+        .replace(/\s*\(.*$/, "")
+        .trim()
+        .toLowerCase()}`;
+}
+
 function parseResources(character: Element, out: PF1Character): void {
     const resources: SheetResource[] = [];
     const seen = new Set<string>();
@@ -515,11 +524,7 @@ function parseResources(character: Element, out: PF1Character): void {
     };
     for (const r of ownAll(own(character, "trackedresources"), "trackedresource")) {
         const name = attr(r, "name");
-        const base = name
-            .replace(/\s*\(.*$/, "")
-            .trim()
-            .toLowerCase();
-        push(`res:${base}`, name, num(attr(r, "max")), num(attr(r, "used")));
+        push(resourceKey(name), name, num(attr(r, "max")), num(attr(r, "used")));
     }
     for (const sc of out.spellcasting) {
         const cls = sc.className.replace(/\s*\(.*$/, "").trim();
@@ -579,11 +584,14 @@ export function mutagenEffects(name: string): AdjustmentEffect[] | undefined {
 }
 
 function parseMutagens(character: Element, out: PF1Character): void {
-    const names = [
-        ...ownAll(own(character, "magicitems"), "item"),
-        ...ownAll(own(character, "gear"), "item"),
-        ...ownAll(own(character, "trackedresources"), "trackedresource"),
-    ].map((el) => attr(el, "name"));
+    // Each mutagen is a tracked resource too (doses brewed); drinking one from the sheet spends it.
+    const tracked = new Set(
+        ownAll(own(character, "trackedresources"), "trackedresource").map((el) => attr(el, "name")),
+    );
+    const names = [...ownAll(own(character, "magicitems"), "item"), ...ownAll(own(character, "gear"), "item")].map(
+        (el) => attr(el, "name"),
+    );
+    names.push(...tracked);
     const found = new Map<string, ImportedAdjustment>();
     for (const name of names) {
         const effects = mutagenEffects(name);
@@ -596,9 +604,39 @@ function parseMutagens(character: Element, out: PF1Character): void {
                 const k = e.target as AbilityKey;
                 return out.abilities[k] - (out.abilityBase?.[k] ?? out.abilities[k]) <= e.value;
             });
-        found.set(key, { key, name: name.replace(/\s*:\s*/, " (").trim() + ")", effects, inExport });
+        found.set(key, {
+            key,
+            name: name.replace(/\s*:\s*/, " (").trim() + ")",
+            effects,
+            inExport,
+            ...(tracked.has(name) ? { resource: resourceKey(name) } : {}),
+        });
     }
-    if (found.size) out.importedAdjustments = [...found.values()];
+    if (found.size) out.importedAdjustments = [...(out.importedAdjustments ?? []), ...found.values()];
+}
+
+// An investigator's Studied Combat, from its special: "Studied Combat (+3, 4 rounds) (Ex)" - an insight
+// bonus on melee attacks and a bonus on melee damage, both the +3, against the studied target. Hero Lab
+// doesn't say whether it was on, and it's for one target at a time, so it starts off.
+function parseStudiedCombat(out: PF1Character): void {
+    for (const special of out.specials ?? []) {
+        const m = /^studied combat\s*\(\s*\+(\d+)/i.exec(special.name);
+        if (!m) continue;
+        const value = Number(m[1]);
+        out.importedAdjustments = [
+            ...(out.importedAdjustments ?? []),
+            {
+                key: "hl:studied-combat",
+                name: `Studied Combat (+${value})`,
+                effects: [
+                    { target: "meleeAttack", type: "insight", value },
+                    { target: "meleeDamage", type: "untyped", value },
+                ],
+                inExport: false,
+            },
+        ];
+        return;
+    }
 }
 
 // ---- auras -------------------------------------------------------------------------------

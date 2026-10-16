@@ -51,10 +51,12 @@ const XML = `<?xml version="1.0" encoding="UTF-8"?>
   <trackedresources>
     <trackedresource name="Smite Evil (1/day) (Su)" used="0" max="1"/>
     <trackedresource name="Wand of Healing (50 charges)" used="10" max="50"/>
+    <trackedresource name="Mutagen: +4 Str, -2 Int, +2 Nat AC" used="0" max="1"/>
   </trackedresources>
   <auras><special name="Aura of Courage (10 ft.) (Su)" shortname="Aura of Courage"/></auras>
   <otherspecials>
     <special name="Life Link (4 max bonds, 140 feet) (Su)" shortname="Life Link" sourcetext="Oracle"><description>Bond.</description></special>
+    <special name="Studied Combat (+3, 4 rounds) (Ex)" shortname="Studied Combat" sourcetext="Investigator"><description>Study.</description></special>
   </otherspecials>
   <spellsknown>
     <spell name="Cure Light Wounds" level="1" class="Oracle" dc="16"><description>cures 1d8 points of damage + 1 point per caster level (maximum +5).</description></spell>
@@ -134,7 +136,7 @@ describe("Hero Lab parser", () => {
         expect(c.auras?.map((a) => `${a.name} ${a.radius}`)).toEqual(["Aura of Courage 10", "Life Link 140"]);
     });
 
-    it("reads mutagens, and whether each was active in the export", () => {
+    it("reads mutagens and Studied Combat, and whether each was active in the export", () => {
         expect(c.importedAdjustments).toEqual([
             {
                 key: "hl:mutagen-4-str-2-int-2-nat-ac",
@@ -145,9 +147,20 @@ describe("Hero Lab parser", () => {
                     { target: "ac", type: "natural", value: 2 },
                 ],
                 inExport: false, // Int isn't lowered
+                resource: "res:mutagen: +4 str, -2 int, +2 nat ac", // drinking it spends this
             },
             expect.objectContaining({ name: "Cognatogen (+4 Cha, -2 Wis, +2 Nat AC)", inExport: true }), // Wis 9 -> 7
+            {
+                key: "hl:studied-combat",
+                name: "Studied Combat (+3)",
+                effects: [
+                    { target: "meleeAttack", type: "insight", value: 3 },
+                    { target: "meleeDamage", type: "untyped", value: 3 },
+                ],
+                inExport: false,
+            },
         ]);
+        expect(c.resources?.map((r) => r.key)).toContain("res:mutagen: +4 str, -2 int, +2 nat ac");
     });
 
     it("keeps skill rules text for the rule cards", () => {

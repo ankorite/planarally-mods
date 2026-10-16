@@ -667,7 +667,21 @@ function toggleAdjustment(key: string, name: string, on: boolean): void {
     const state = adjustmentState();
     state.enabled = state.enabled.filter((k) => k !== key);
     if (on) state.enabled.push(key);
-    saveAndReexport(`${name} ${on ? "on" : "off"}.`);
+    saveAndReexport(`${name} ${on ? "on" : "off"}.${on ? drinkDose(key) : ""}`);
+}
+
+/**
+ * Switching on a mutagen drinks a dose: one use of its resource (Resources tab, and its tracker on the
+ * token). Switching it off gives nothing back - the dose is gone. Returns a note for the status line.
+ */
+function drinkDose(key: string): string {
+    const adj = data.value.importedAdjustments?.find((a) => a.key === key);
+    const r = adj?.resource ? data.value.resources?.find((x) => x.key === adj.resource) : undefined;
+    if (!r) return "";
+    const left = usesLeft(r);
+    if (left <= 0) return " No doses left on the Resources tab.";
+    setUsesLeft(r, left - 1);
+    return ` Drank a dose: ${left - 1} left.`;
 }
 
 // --- Spell macros --------------------------------------------------------------------------------
@@ -2124,8 +2138,9 @@ function fmt(n: number): string {
             <template v-if="data.importedAdjustments?.length">
                 <h4>From Hero Lab</h4>
                 <div class="readonly-note">
-                    Mutagens from the export. One that was active in Hero Lab is already in the imported numbers: leave
-                    it ticked while it lasts, and untick it when it wears off.
+                    Mutagens and class abilities from the export. One that was active in Hero Lab is already in the
+                    imported numbers: leave it ticked while it lasts, and untick it when it wears off. Ticking a mutagen
+                    drinks a dose (one use on the Resources tab).
                 </div>
                 <div class="adjustment-list">
                     <div v-for="adj of data.importedAdjustments" :key="adj.key" class="adjustment">
