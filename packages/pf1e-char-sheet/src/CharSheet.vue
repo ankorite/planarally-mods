@@ -1318,9 +1318,15 @@ function specialCard(sp: SpecialEntry): RuleCard {
     return {
         title: sp.name,
         meta: meta.length ? [meta.join(" · ")] : [],
-        body: sp.fullText || ruleText("special", sp.name) || sp.description,
+        // In the compendium under its short name (rules.ts) - or, if that entry went missing, still under the
+        // full name a sheet from before 1.1 stored it as.
+        body:
+            sp.fullText ||
+            (sp.rule ? ruleText("special", sp.rule) : "") ||
+            ruleText("special", sp.name) ||
+            sp.description,
         // A monster's specials stay on its sheet, not in the compendium.
-        rule: isCharacter.value ? { kind: "special", name: sp.name } : undefined,
+        rule: isCharacter.value ? { kind: "special", name: sp.rule ?? sp.name } : undefined,
     };
 }
 

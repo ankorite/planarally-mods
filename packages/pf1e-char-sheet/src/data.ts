@@ -267,6 +267,11 @@ export interface SpecialEntry {
     description: string;
     /** Full rules text, shown on hover. */
     fullText: string;
+    /**
+     * The name its rules text has in the compendium (rules.ts), when that isn't `name`: "Trap Sense" for
+     * "Trap Sense +2 (Ex)", so a level-up doesn't add another entry. Absent before 1.1.
+     */
+    rule?: string;
 }
 
 /** Groups specials by category, keeping the order in which each category first appears. */

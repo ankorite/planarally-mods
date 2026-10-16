@@ -21,6 +21,13 @@ import { guessSpellFormula } from "./spells";
 // item abilities). A monster's or NPC's specials stay on its own DM-only sheet, so its abilities never
 // show up in the players' compendium.
 //
+// A special's name carries what changes as the character levels ("Trap Sense +2 (Ex)", "Smite Evil
+// (2/day)"), so it is stored under the name without those parts ("Trap Sense"), and the sheet remembers
+// that name (SpecialEntry.rule): a level-up finds the same entry instead of adding another. Two
+// different texts under one such name (an investigator's Mutagen discovery and Mutagen ability) get the
+// source added ("Mutagen (Investigator)"), else the full name. Entries stored under full names before
+// 1.1 stay readable, but one whose text is also under its short name isn't listed in the compendium.
+//
 // A server without the compendium keeps the text on each sheet, as before.
 
 export type RuleKind = "feat" | "spell" | "skill" | "special";
@@ -110,6 +117,19 @@ export function ruleId(kind: RuleKind, name: string): string {
     return `${kind}-${slug || "unnamed"}`;
 }
 
+/**
+ * A special's name without what changes with level: parenthesised parts and a trailing number, bonus or
+ * dice. "Trap Sense +2 (Ex)" -> "Trap Sense", "Studied Strike +2d6 (Ex)" -> "Studied Strike",
+ * "Mythic Power (5/day, Surge +1d6)" -> "Mythic Power", "Cape of free will +2/+3" -> "Cape of free will".
+ */
+export function specialRuleName(name: string): string {
+    const short = name
+        .replace(/\s*\([^)]*\)/g, "")
+        .replace(/\s+[+-]?\d+(?:d\d+)?(?:\/[+-]?\d+)*\s*$/i, "")
+        .trim();
+    return short || name.trim();
+}
+
 /** This client's copy of a rule: from its shard, else from the pre-1.0 block. Reactive. */
 function localEntry(id: string): CompendiumEntry | undefined {
     return shards[shardOf(id)]?.reactiveData.value.entries[id] ?? legacy?.reactiveData.value.entries[id] ?? undefined;
@@ -123,10 +143,27 @@ function allEntries(): CompendiumEntry[] {
     return [...byId.values()];
 }
 
+/**
+ * The entries to list in the compendium: all of them, except a special stored under its full name before
+ * 1.1 when the same text is also stored under a shorter name (the one the sheets use now).
+ */
+export function listedEntries(entries: CompendiumEntry[]): CompendiumEntry[] {
+    const shortest = new Map<string, CompendiumEntry>();
+    for (const e of entries) {
+        if (e.kind !== "special") continue;
+        const key = `${specialRuleName(e.name)}\u0000${e.body}`;
+        const seen = shortest.get(key);
+        if (!seen || e.name.length < seen.name.length) shortest.set(key, e);
+    }
+    return entries.filter(
+        (e) => e.kind !== "special" || shortest.get(`${specialRuleName(e.name)}\u0000${e.body}`) === e,
+    );
+}
+
 function register(api: GameApi): void {
     unregister?.();
     unregister = undefined;
-    const entries = allEntries();
+    const entries = listedEntries(allEntries());
     if (!entries.length) return;
     unregister = api.compendium.register(entries, {
         name: BOOK,
@@ -399,11 +436,36 @@ export function moveRulesToCompendium(
         if (put("skill", skill.name, skill.description ?? "")) delete skill.description;
     }
     if (withSpecials) {
+        const current = (name: string): CompendiumEntry | undefined => {
+            const id = ruleId("special", name);
+            return pending.get(shardOf(id))?.[id] ?? localEntry(id);
+        };
         for (const sp of character.specials ?? []) {
+            // The text: on the sheet, else (a sheet from before 1.1, its text already moved) in the entry
+            // it was stored under.
+            const body = sp.fullText || (sp.rule ? current(sp.rule)?.body : undefined) || current(sp.name)?.body || "";
+            if (!body) continue;
+            // The name to keep it under: the one this sheet already uses, the short name, the short name
+            // with its source, or the full name - the first that is free or already holds this text.
+            const short = specialRuleName(sp.name);
+            const names = [sp.rule, short, sp.source ? `${short} (${sp.source})` : undefined].filter(
+                (n): n is string => !!n,
+            );
+            const name =
+                names.find((n) => {
+                    const e = current(n);
+                    return !e || e.body === body;
+                }) ?? sp.name;
             const group: Record<string, string> = {};
             if (sp.category) group["category"] = sp.category;
             if (sp.source) group["source"] = sp.source;
-            if (put("special", sp.name, sp.fullText, Object.keys(group).length ? group : undefined)) sp.fullText = "";
+            const onSheet = sp.fullText !== "";
+            if (put("special", name, body, Object.keys(group).length ? group : undefined)) {
+                if (onSheet) sp.fullText = "";
+                else stripped--; // its text was already off this sheet
+            }
+            if (name === sp.name) delete sp.rule;
+            else sp.rule = name;
         }
     }
 
