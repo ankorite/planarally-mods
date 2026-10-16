@@ -94,7 +94,11 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/data.ts` — the `PF1Character` schema stored in the shape's DataBlock
 - `src/CharSheet.vue` — the sheet UI (Sheet / Spells / Resources / Adjustments / Feats / Specials /
   Inventory / Token / Config tabs, or Sheet / Spells / Resources / Adjustments / Specials / Token / Config
-  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources)
+  for a monster/NPC; Spells and Resources only when there are spells / limited-use resources). Being
+  split up: the Adjustments, Feats, Inventory, Config and Diagnostics tabs and the rule card are already
+  components in `src/sheet/`
+- `src/sheet/` — the sheet's components, the context they share with `CharSheet.vue`
+  (`context.ts`, provide / inject), the rule cards (`ruleCards.ts`) and the sheet's styles (`sheet.scss`)
 - `src/herolab/parser.ts` — Hero Lab XML → `PF1Character` importer
 - `src/customdata.ts` — exports the sheet to the token's Custom Data
 - `src/roll.ts` — dice rolls through PlanarAlly's dice engine
@@ -106,7 +110,8 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/diagnostics.ts` — the DM-only Diagnostics tab's reports
 - `src/updates.ts` — checks GitHub for a newer version of the mod
 - `src/crits.ts` — the natural 20 / natural 1 animation, from PlanarAlly's dice history
-- `src/rules.ts` — feat, spell and skill rules text in a campaign room block and PlanarAlly's compendium
+- `src/rules.ts` — rules text of feats, spells, skills and specials in the campaign's room blocks and
+  PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
 
 ## Importing from Hero Lab
