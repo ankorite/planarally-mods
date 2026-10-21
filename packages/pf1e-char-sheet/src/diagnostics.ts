@@ -15,7 +15,7 @@ import type { GameApi } from "@planarally/mod-api";
 import { buildElements, CD_SOURCE } from "./customdata";
 import type { PF1Character } from "./data";
 import { trackedKeys } from "./resources";
-import { resolveFormula } from "./roll";
+import { hasNativeDice, resolveFormula } from "./roll";
 import { rulesStatus } from "./rules";
 import { isHpTrackerName } from "./trackers";
 
@@ -692,6 +692,11 @@ export async function buildHealthCheck(
             }
         }
         ok(`${good} of ${rolls.length} formulas resolve${engine === undefined ? "" : " and parse"}`);
+        ok(
+            hasNativeDice(api)
+                ? "rolls go through PlanarAlly's dice API (mod API 0.6)"
+                : "no dice API on this server (mod API before 0.6): rolls use the dice panel or the 2d engine",
+        );
     });
 
     await section("Rules text", () => {

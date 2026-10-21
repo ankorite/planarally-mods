@@ -3,6 +3,14 @@
 ## [2026-10-16]
 
 - pf1e-char-sheet v1.1.0-beta.1:
+    - mod API 0.6 (`@planarally/mod-api` ^0.6.0):
+        - rolls go through PlanarAlly's new dice API when the server has it: one click, PlanarAlly's own
+          roll (3D dice, notification, history), shared as the player's dice tool or "for me only".
+          Older servers keep the dice panel / quick roll
+        - compendium entries are registered with the new schema (`system: "pf1e"`, the rule's kind) and
+          read back through `compendium.getEntries`; older servers still get the `kind` they read
+        - the Custom Data lease uses `customData.loadAndDropState` when there is one
+        - the natural 20 / 1 animation also reads the new roll outcome format
     - one compendium entry per special across level-ups: specials are stored under their name without
       the per-level part ("Trap Sense +2 (Ex)" -> "Trap Sense"); different texts with the same short
       name get their source added. 1.0 sheets move over when opened, and the old full-name entries stop

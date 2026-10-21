@@ -52,7 +52,7 @@ class FakeBlock<D> {
 
 function fakeApi(server: Server) {
     const blocks = new Map<string, FakeBlock<unknown>>();
-    const registered: { entries: { id: string }[] }[] = [];
+    const registered: { entries: { id: string; schema?: { system: string; kind: string } }[] }[] = [];
     const api = {
         compendium: {
             register(entries: { id: string }[]) {
@@ -280,5 +280,23 @@ describe("rules storage", () => {
         expect(now).not.toContain(oldId);
         expect(listed).toContain(oldId); // before the move
         expect(listedEntries([old as never])).toHaveLength(1); // alone, an old entry is still listed
+    });
+
+    it("registers mod API 0.6 entries and reads them back through getEntries", async () => {
+        const server: Server = new Map();
+        const s = fakeApi(server);
+        // A 0.6 server: getEntries returns what was registered, as PlanarAlly's records.
+        const api = s.api as unknown as { compendium: Record<string, unknown> };
+        api.compendium["getEntries"] = (system: string, kind: string) =>
+            (s.registered.at(-1)?.entries ?? [])
+                .filter((e) => e.schema?.system === system && e.schema?.kind === kind)
+                .map((e) => ({ ...e, mod: "pf1e-sheet", ref: `pf1e-sheet/${e.id}`, body: "from the compendium" }));
+        await initRules(s.api, "pf1e-sheet");
+        moveRulesToCompendium(s.api, character(), true);
+        await new Promise((r) => setTimeout(r, 80));
+        const feat = s.registered.at(-1)!.entries.find((e) => e.id === "feat-power-attack");
+        expect(feat).toMatchObject({ schema: { system: "pf1e", kind: "feat" }, kind: "feat" });
+        expect(ruleText("feat", "Power Attack")).toBe("from the compendium");
+        expect(ruleRegistered("feat", "Power Attack")).toBe(true);
     });
 });

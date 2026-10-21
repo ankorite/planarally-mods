@@ -16,7 +16,12 @@
 // DROPS a variable it can't find, turning `1d20 + {Spellcraft}` into a bare `1d20`, so both paths
 // refuse to roll when a field is missing instead.
 //
-// Two ways to roll:
+// SERVERS WITH MOD API 0.6 have `api.dice`, PlanarAlly's own roll for mods: it resolves `{fields}`
+// itself, rolls exactly like the dice tool (3D dice, the toast, the history, "share with") in one click,
+// and refuses a field it can't resolve. The sheet uses it when it is there (`rollNative`); the two
+// ways below are for older servers.
+//
+// Two ways to roll on an older server:
 //   * `rollFormula`     - rolled here, shown to the roller only (PA's result card + history if
 //                         `useNativeUi`: `dice.addToHistory(roll, playerName, label)` records it and
 //                         `dice.showResults(roll)` opens PA's result card - verified on a live server).
@@ -52,10 +57,11 @@ export class RollError extends Error {}
 /** One or more `{fields}` a formula uses don't exist in the token's Custom Data. */
 export class MissingFieldsError extends RollError {
     missing: string[];
-    constructor(missing: string[]) {
+    constructor(missing: string[], message?: string) {
         super(
-            `Custom Data field${missing.length > 1 ? "s" : ""} ${missing.map((m) => `{${m}}`).join(", ")} not found on ` +
-                `this token - use "Export to Custom Data" on the Token tab.`,
+            message ??
+                `Custom Data field${missing.length > 1 ? "s" : ""} ${missing.map((m) => `{${m}}`).join(", ")} not found on ` +
+                    `this token - use "Export to Custom Data" on the Token tab.`,
         );
         this.missing = missing;
     }
@@ -277,4 +283,50 @@ export async function openInDicePanel(api: unknown, formula: string, shape?: num
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 100));
     call(dice, "setInput", text);
+}
+
+// ---- mod API 0.6: api.dice ------------------------------------------------------------------------
+
+/** Whether the server has mod API 0.6's dice API (`api.dice.roll`). */
+export function hasNativeDice(api: unknown): boolean {
+    return typeof get(get(api, "dice"), "roll") === "function";
+}
+
+export interface NativeRollOptions {
+    label: string;
+    /** The token whose Custom Data `{fields}` resolve against. */
+    shape?: number;
+    /** Roll for this player only; otherwise as the player's dice tool shares it. */
+    onlyMe: boolean;
+}
+
+/**
+ * Rolls through `api.dice.roll`: PlanarAlly's own roll, with its 3D dice, toast and history (where
+ * crits.ts sees it). A field PlanarAlly can't resolve is a MissingFieldsError, so the sheet can export
+ * its Custom Data and try again; any other refusal (bad formula, dice disabled) is a RollError with
+ * PlanarAlly's message. Failures are reported by the sheet rather than in a toast.
+ */
+export async function rollNative(
+    api: unknown,
+    formula: string,
+    opts: NativeRollOptions,
+): Promise<{ total: number; expression: string }> {
+    const options: Dict = { label: opts.label, silent: true };
+    if (opts.shape !== undefined) options["shape"] = opts.shape;
+    if (opts.onlyMe) options["shareWith"] = "none";
+    try {
+        const outcome = await call(get(api, "dice"), "roll", formula, options);
+        const expression = get(outcome, "expression");
+        return {
+            total: Number(get(outcome, "total")),
+            expression: typeof expression === "string" ? expression : formula,
+        };
+    } catch (e) {
+        if (get(e, "name") !== "DiceRollError") throw e;
+        const text = get(e, "message");
+        const message = typeof text === "string" && text ? text : "The roll failed.";
+        if (get(e, "reason") !== "reference") throw new RollError(message);
+        const fields = Array.from(formula.matchAll(fieldRe()), (m) => m[2] ?? "");
+        throw new MissingFieldsError(fields, message);
+    }
 }

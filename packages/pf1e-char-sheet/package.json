@@ -26,7 +26,7 @@
         "test": "vitest run"
     },
     "dependencies": {
-        "@planarally/mod-api": "^0.4.0",
+        "@planarally/mod-api": "^0.6.0",
         "vue": "^3.5.43"
     },
     "devDependencies": {

@@ -83,8 +83,8 @@ importers:
   packages/pf1e-char-sheet:
     dependencies:
       '@planarally/mod-api':
-        specifier: ^0.4.0
-        version: 0.4.0(vue@3.5.43(typescript@6.0.3))
+        specifier: ^0.6.0
+        version: 0.6.0(vue@3.5.43(typescript@6.0.3))
       vue:
         specifier: ^3.5.43
         version: 3.5.43(typescript@6.0.3)
@@ -544,6 +544,11 @@ packages:
 
   '@planarally/mod-api@0.4.0':
     resolution: {integrity: sha512-8QoyQtKe5lZJ2avNtmfWkteKFCTjK6chsy4N436tAzqCx+srdnkicxDp3FI/XscnrAOUGEA1m0p5oSIAzv2E/w==}
+    peerDependencies:
+      vue: ^3.5.0
+
+  '@planarally/mod-api@0.6.0':
+    resolution: {integrity: sha512-5FFjuYIaRGGs637XnHqJpSr0p1AOA6IiPWD7Cr7v1rapJvBwjZrDX6GmBW+d5KvuUe5w1HSgi5XlOcfjOsRHEQ==}
     peerDependencies:
       vue: ^3.5.0
 
@@ -1627,6 +1632,10 @@ snapshots:
     optional: true
 
   '@planarally/mod-api@0.4.0(vue@3.5.43(typescript@6.0.3))':
+    dependencies:
+      vue: 3.5.43(typescript@6.0.3)
+
+  '@planarally/mod-api@0.6.0(vue@3.5.43(typescript@6.0.3))':
     dependencies:
       vue: 3.5.43(typescript@6.0.3)
 

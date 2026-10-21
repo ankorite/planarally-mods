@@ -47,7 +47,7 @@ import {
     trackedKeys,
     usesLeft,
 } from "./resources";
-import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
+import { MissingFieldsError, RollError, hasNativeDice, openInDicePanel, rollFormula, rollNative } from "./roll";
 import { moveRulesToCompendium, rulesReady, ruleText } from "./rules";
 import AdjustmentsTab from "./sheet/AdjustmentsTab.vue";
 import { isHiddenIn, type ConfigList } from "./sheet/config";
@@ -774,10 +774,13 @@ function renameShape(id: LocalId, name: string): string {
 // number - so a value edited in PlanarAlly's Custom Data tab (a buff, a penalty) changes every roll that
 // uses it. The names come from the same builder that exports the fields (see customdata.ts).
 //
-// Two modes. "panel": the formula goes into PlanarAlly's own dice panel and you press Enter there - PA's
-// native roll, with 3D dice and the toast other players see (PA expands the fields itself). "quick":
-// rolled right here with PA's 2d engine (roll.ts expands the fields) and shown only to you; nothing is
-// sent to other players. Panel is the default because it is the one that is shared.
+// On a server with mod API 0.6 every roll goes through PlanarAlly's own roll (`api.dice`, see roll.ts):
+// "panel" shares it as the player's dice tool does, "quick" rolls it for them only.
+//
+// On an older server, two modes. "panel": the formula goes into PlanarAlly's own dice panel and you press
+// Enter there - PA's native roll, with 3D dice and the toast other players see (PA expands the fields
+// itself). "quick": rolled right here with PA's 2d engine (roll.ts expands the fields) and shown only to
+// you; nothing is sent to other players. Panel is the default because it is the one that is shared.
 function loadRollMode(): "quick" | "panel" {
     try {
         return localStorage.getItem("pf1e-sheet-roll-mode") === "quick" ? "quick" : "panel";
@@ -817,6 +820,12 @@ watch(showResultCard, (on) => {
     }
 });
 
+/**
+ * Mod API 0.6's dice API: rolls go straight through PlanarAlly's own roll (one click, shared as the
+ * player's dice tool shares, or for them only), with no dice panel and no result popup to choose.
+ */
+const nativeDice = hasNativeDice(api);
+
 const rollStatus = ref("");
 const rolling = ref(false);
 
@@ -829,6 +838,11 @@ async function doRoll(label: string, formula: string): Promise<void> {
     const shape = currentLocalId.value;
 
     const attempt = async (): Promise<string> => {
+        if (nativeDice) {
+            rollStatus.value = `Rolling ${label}...`;
+            const out = await rollNative(api, formula, { label, shape, onlyMe: rollMode.value === "quick" });
+            return `${label}: ${out.total} = ${out.expression}`;
+        }
         if (rollMode.value === "panel") {
             rollStatus.value = `Opening ${label} in PA's dice panel...`;
             await openInDicePanel(api, formula, shape);
@@ -1244,10 +1258,20 @@ provide(SHEET_CONTEXT, {
         </div>
         <div class="roll-bar">
             <span class="roll-mode">
-                <label><input v-model="rollMode" type="radio" value="panel" /> PA dice panel (everyone sees it)</label>
-                <label><input v-model="rollMode" type="radio" value="quick" /> Quick roll (only you)</label>
+                <template v-if="nativeDice">
+                    <label
+                        ><input v-model="rollMode" type="radio" value="panel" /> Roll (shared as your dice tool)</label
+                    >
+                    <label><input v-model="rollMode" type="radio" value="quick" /> Roll for me only</label>
+                </template>
+                <template v-else>
+                    <label
+                        ><input v-model="rollMode" type="radio" value="panel" /> PA dice panel (everyone sees it)</label
+                    >
+                    <label><input v-model="rollMode" type="radio" value="quick" /> Quick roll (only you)</label>
+                </template>
             </span>
-            <label v-if="rollMode === 'quick'" class="roll-toggle">
+            <label v-if="rollMode === 'quick' && !nativeDice" class="roll-toggle">
                 <input v-model="showResultCard" type="checkbox" /> Result popup
             </label>
             <span v-if="rollStatus" class="roll-status">{{ rollStatus }}</span>

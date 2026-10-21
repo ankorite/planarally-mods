@@ -46,13 +46,24 @@ export function setCritFxEnabled(on: boolean): void {
 
 /**
  * Whether a roll has a natural 20 or 1 on a d20 that counts (kept). A 20 wins over a 1 when a roll has
- * both (two separate d20s in one formula).
+ * both (two separate d20s in one formula). Reads PlanarAlly's dice engine parts ({die: "d20", output:
+ * [{roll, status}]}) and mod API 0.6's roll outcome parts ({kind: "dice", sides: 20, dice: [{value,
+ * counted, status}]}).
  */
 export function naturalOf(roll: unknown): Natural | undefined {
     const parts = (roll as { parts?: unknown[] } | undefined)?.parts;
     if (!Array.isArray(parts)) return undefined;
     let found: Natural | undefined;
     for (const part of parts) {
+        const outcome = part as { kind?: unknown; sides?: unknown; dice?: unknown };
+        if (outcome.kind === "dice" && outcome.sides === 20 && Array.isArray(outcome.dice)) {
+            for (const die of outcome.dice as { value?: unknown; counted?: unknown; status?: unknown }[]) {
+                if (die?.counted === false || die?.status === "dropped" || die?.status === "overridden") continue;
+                if (die?.value === 20) return "nat20";
+                if (die?.value === 1) found = "nat1";
+            }
+            continue;
+        }
         const p = part as { die?: unknown; output?: unknown };
         if (p.die !== "d20" || !Array.isArray(p.output)) continue;
         for (const die of p.output as { roll?: unknown; status?: unknown }[]) {

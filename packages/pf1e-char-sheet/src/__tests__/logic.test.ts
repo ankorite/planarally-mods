@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { applyAdjustments, hitDice, leadingDamage, stackEffects } from "../adjustments";
 import { naturalOf } from "../crits";
 import { buildSheet, cdName, damageFormula, iterativeBonuses, ordinal } from "../customdata";
+import { holdCustomDataLease } from "../customdata";
 import { emptyCharacter, type AdjustmentEffect, type PF1Character } from "../data";
 import { carryUsesLeft, refillsDaily, resourceLabel, trackedKeys, usesLeft } from "../resources";
+import { MissingFieldsError, RollError, hasNativeDice, rollNative } from "../roll";
 import { defensiveBonus, defensiveDc, guessSpellFormula } from "../spells";
 import { compareVersions, tomlVersion } from "../updates";
 
@@ -158,6 +160,15 @@ describe("natural 20 / 1", () => {
         expect(naturalOf(roll({ roll: 1 }))).toBe("nat1");
         expect(naturalOf(roll({ roll: 12 }))).toBeUndefined();
     });
+    it("reads mod API 0.6 roll outcomes too", () => {
+        const dice = (...d: { value: number; counted?: boolean; status?: string }[]) => ({
+            parts: [{ kind: "dice", expression: "1d20", amount: d.length, sides: 20, total: 0, dice: d }],
+        });
+        expect(naturalOf(dice({ value: 20, counted: true }))).toBe("nat20");
+        expect(naturalOf(dice({ value: 1, counted: true }))).toBe("nat1");
+        expect(naturalOf(dice({ value: 20, counted: false }, { value: 9, counted: true }))).toBeUndefined();
+        expect(naturalOf({ parts: [{ kind: "dice", sides: 6, dice: [{ value: 1 }] }] })).toBeUndefined();
+    });
     it("ignores dropped dice and other dice", () => {
         expect(naturalOf(roll({ roll: 20, status: "dropped" }, { roll: 14, status: "kept" }))).toBeUndefined();
         expect(naturalOf({ parts: [{ die: "d6", output: [{ roll: 1 }] }] })).toBeUndefined();
@@ -244,5 +255,72 @@ describe("update check", () => {
         for (let i = 0; i < order.length - 1; i++) expect(compareVersions(order[i]!, order[i + 1]!)).toBe(-1);
         expect(compareVersions("1.0", "1.0.0")).toBe(0);
         expect(tomlVersion('[mod]\nversion = "1.0.0"\n')).toBe("1.0.0");
+    });
+});
+
+describe("mod API 0.6", () => {
+    const diceError = (reason: string, message: string) =>
+        Object.assign(new Error(message), { name: "DiceRollError", reason });
+
+    it("rolls through api.dice when the server has it", async () => {
+        const calls: unknown[][] = [];
+        const api = {
+            dice: {
+                roll: (formula: string, options: unknown) => {
+                    calls.push([formula, options]);
+                    return Promise.resolve({ total: 17, expression: "1d20 + 11", parts: [] });
+                },
+            },
+        };
+        expect(hasNativeDice(api)).toBe(true);
+        expect(hasNativeDice({})).toBe(false);
+        const out = await rollNative(api, "1d20 + {Spellcraft}", { label: "Spellcraft", shape: 4, onlyMe: false });
+        expect(out).toEqual({ total: 17, expression: "1d20 + 11" });
+        await rollNative(api, "1d20", { label: "Secret", onlyMe: true });
+        expect(calls).toEqual([
+            ["1d20 + {Spellcraft}", { label: "Spellcraft", silent: true, shape: 4 }],
+            ["1d20", { label: "Secret", silent: true, shareWith: "none" }],
+        ]);
+    });
+
+    it("turns PlanarAlly's refusals into the sheet's errors", async () => {
+        const failing = (e: Error) => ({ dice: { roll: () => Promise.reject(e) } });
+        const missing = rollNative(
+            failing(diceError("reference", "No {Spellcraft} on this token")),
+            "1d20 + {Spellcraft}",
+            {
+                label: "x",
+                onlyMe: false,
+            },
+        );
+        await expect(missing).rejects.toBeInstanceOf(MissingFieldsError);
+        await expect(missing).rejects.toMatchObject({
+            missing: ["Spellcraft"],
+            message: "No {Spellcraft} on this token",
+        });
+        const disabled = rollNative(failing(diceError("disabled", "Dice are disabled")), "1d20", {
+            label: "x",
+            onlyMe: false,
+        });
+        await expect(disabled).rejects.toBeInstanceOf(RollError);
+        await expect(disabled).rejects.toMatchObject({ message: "Dice are disabled" });
+    });
+
+    it("holds the Custom Data lease with loadAndDropState", () => {
+        const calls: [number[], string][] = [];
+        const api = {
+            systems: {
+                customData: {
+                    loadAndDropState: (ids: ReadonlySet<number>, source: string) => calls.push([[...ids], source]),
+                },
+            },
+        };
+        const release = holdCustomDataLease(api as never, 7 as never);
+        release();
+        release();
+        expect(calls).toEqual([
+            [[7], "pf1e-sheet"],
+            [[], "pf1e-sheet"],
+        ]);
     });
 });

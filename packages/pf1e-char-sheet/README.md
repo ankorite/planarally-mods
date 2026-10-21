@@ -17,7 +17,8 @@ during play.
 
 Requirements:
 
-- A PlanarAlly server with the mod API (the `dev` branch or a release that includes mods).
+- A PlanarAlly server with the mod API (the `dev` branch or a release that includes mods). Built against
+  mod API 0.6; older servers (0.2 to 0.5) still work, without one-click shared rolls.
 - Hero Lab Classic, exporting with File > Custom Output > Export XML. Export with Hero Lab's own
   adjustments switched off and use the sheet's Adjustments tab instead, or they count twice.
 
@@ -403,7 +404,14 @@ PlanarAlly's Custom Data tab (a buff, a penalty) therefore changes every roll th
 is missing, the sheet re-exports Custom Data once and retries; it never rolls with a modifier silently
 dropped.
 
-Two roll modes, chosen above the tabs and remembered per browser:
+On a server with mod API 0.6 or later, a button rolls straight away through PlanarAlly's own dice
+API: the same roll as its dice tool (3D dice if you use them, the notification, the dice history), in
+one click. Two modes, chosen above the tabs and remembered per browser:
+
+- **Roll (shared as your dice tool)** (default): shared the way your dice tool's "share with" is set.
+- **Roll for me only**: nobody else sees it.
+
+On an older server the two modes are:
 
 - **PA dice panel** (default): the formula is placed in PlanarAlly's dice panel and you press Enter.
   This is PlanarAlly's native roll: 3D dice, "share with", and the notification other players see.
