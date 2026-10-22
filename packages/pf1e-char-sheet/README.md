@@ -488,7 +488,9 @@ feet.
 
 The DM-only **Diagnostics** tab has two read-only reports to copy into a bug report:
 
-- **Health check**: checks the sheet on this token. It verifies that every PlanarAlly API function the
+- **Health check**: checks the sheet on this token. It starts with which PlanarAlly the server runs:
+  its release and build (e.g. `2026.2 - Docker image "dev", commit 0fda215`; a dev and a stable server
+  have the same release number, the build tells them apart) and the mod API features it has. It verifies that every PlanarAlly API function the
   sheet uses exists, compares the HP tracker, Custom Data and auras with the sheet, resolves every roll
   formula without rolling it, and lists recent tracker / Custom Data events. Problems are listed at
   the top.

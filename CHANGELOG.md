@@ -11,6 +11,9 @@
           read back through `compendium.getEntries`; older servers still get the `kind` they read
         - the Custom Data lease uses `customData.loadAndDropState` when there is one
         - the natural 20 / 1 animation also reads the new roll outcome format
+    - the Diagnostics reports show the server's PlanarAlly release and build (Docker tag and commit, or
+      git describe), explained, and the mod API features it has, so a dev and a stable server can be
+      told apart in a bug report
     - one compendium entry per special across level-ups: specials are stored under their name without
       the per-level part ("Trap Sense +2 (Ex)" -> "Trap Sense"); different texts with the same short
       name get their source added. 1.0 sheets move over when opened, and the old full-name entries stop
