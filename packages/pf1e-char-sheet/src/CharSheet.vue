@@ -1,18 +1,11 @@
 <script setup lang="ts">
 import type { LocalId } from "@planarally/mod-api";
-import { ref, watch, computed, onBeforeUnmount } from "vue";
+import { ref, watch, computed, onBeforeUnmount, provide } from "vue";
 
 import { isCharacterShape, isDm as viewerIsDm } from "./access";
-import {
-    applyAdjustments,
-    BONUS_TYPES,
-    BUILTIN_ADJUSTMENTS,
-    describeEffects,
-    enabledAdjustments,
-    TARGET_LABELS,
-} from "./adjustments";
+import { applyAdjustments, enabledAdjustments } from "./adjustments";
 import { syncAuras } from "./auras";
-import { critFxEnabled, naturalOf, playCrit, setCritFxEnabled } from "./crits";
+import { naturalOf, playCrit } from "./crits";
 import {
     attackFormula,
     buildElements,
@@ -33,19 +26,14 @@ import {
     DATA_BLOCK_NAME,
     groupSpecials,
     type AbilityKey,
-    type AdjustmentEffect,
     type AdjustmentState,
-    type AdjustmentTarget,
-    type FeatEntry,
     type PF1Character,
-    SHEET_SECTIONS,
     type SheetConfig,
     type SheetResource,
     type SpecialEntry,
     type SpellcastingClass,
     type SpellEntry,
 } from "./data";
-import { buildApiDump, buildHealthCheck } from "./diagnostics";
 import { duplicateToken } from "./duplicate";
 import { parseHeroLabXml, HeroLabImportError } from "./herolab/parser";
 import { api, modVersion } from "./main";
@@ -59,8 +47,18 @@ import {
     trackedKeys,
     usesLeft,
 } from "./resources";
-import { MissingFieldsError, RollError, openInDicePanel, rollFormula } from "./roll";
-import { moveRulesToCompendium, openRule, ruleRegistered, rulesReady, ruleText, type RuleKind } from "./rules";
+import { MissingFieldsError, RollError, hasNativeDice, openInDicePanel, rollFormula, rollNative } from "./roll";
+import { moveRulesToCompendium, rulesReady, ruleText } from "./rules";
+import AdjustmentsTab from "./sheet/AdjustmentsTab.vue";
+import { isHiddenIn, type ConfigList } from "./sheet/config";
+import ConfigTab from "./sheet/ConfigTab.vue";
+import { SHEET_CONTEXT } from "./sheet/context";
+import DiagnosticsTab from "./sheet/DiagnosticsTab.vue";
+import FeatsTab from "./sheet/FeatsTab.vue";
+import InventoryTab from "./sheet/InventoryTab.vue";
+import RuleCardPopup from "./sheet/RuleCardPopup.vue";
+import { createRuleCards, type RuleCard } from "./sheet/ruleCards";
+import { BASE_TABS, LIMITED_TABS, type TabName } from "./sheet/tabs";
 import { defensiveBonus, defensiveDc, spellFormula, spellGuess, spellKey } from "./spells";
 import { findHpTracker, pushHp, type HpPushResult } from "./trackers";
 import { logDismissed, newerVersion, RELEASES_URL } from "./updates";
@@ -211,31 +209,6 @@ function setWidth(w: WidthKey): void {
     }
 }
 
-// "Sheet" is the paper-style front page (abilities, combat, saves, weapons, skills); "Token" has what
-// acts on the token itself (auras, Custom Data, the HP push).
-const BASE_TABS = [
-    "Sheet",
-    "Spells",
-    "Resources",
-    "Adjustments",
-    "Feats",
-    "Specials",
-    "Inventory",
-    "Token",
-    "Config",
-] as const;
-const LIMITED_TABS = ["Sheet", "Spells", "Resources", "Adjustments", "Specials", "Token", "Config"] as const;
-/** Tabs the Config tab can hide (the Sheet, Config and Diagnostics tabs always show). */
-const HIDEABLE_TABS: readonly string[] = [
-    "Spells",
-    "Resources",
-    "Adjustments",
-    "Feats",
-    "Specials",
-    "Inventory",
-    "Token",
-];
-type TabName = (typeof BASE_TABS)[number] | "Diagnostics";
 const activeTab = ref<TabName>("Sheet");
 
 // The Diagnostics tab (read-only reports on the sheet and PlanarAlly's mod API) is for the DM only.
@@ -318,46 +291,6 @@ watch(
     { immediate: true },
 );
 
-// --- Diagnostics (see diagnostics.ts) ------------------------------------------------------
-// Each report replaces the previous one; Copy puts it on the clipboard for a bug report.
-const diagOutput = ref("");
-const diagBusy = ref(false);
-const diagTextarea = ref<HTMLTextAreaElement>();
-const diagCopyStatus = ref("");
-
-async function runDiag(fn: () => Promise<string>): Promise<void> {
-    if (diagBusy.value) return;
-    diagBusy.value = true;
-    diagOutput.value = "";
-    try {
-        diagOutput.value = await fn();
-    } catch (e) {
-        diagOutput.value = `Report failed: ${String(e)}`;
-    } finally {
-        diagBusy.value = false;
-    }
-}
-
-async function copyDiag(): Promise<void> {
-    const text = diagOutput.value;
-    try {
-        // The async clipboard API only exists on secure contexts (https / localhost); a dev
-        // server reached by plain http://ip:port won't have it, so fall back to selecting the
-        // textarea and using the legacy copy command.
-        if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(text);
-        } else {
-            diagTextarea.value?.focus();
-            diagTextarea.value?.select();
-            document.execCommand("copy");
-        }
-        diagCopyStatus.value = "Copied.";
-    } catch {
-        diagCopyStatus.value = "Copy failed - click in the box, Ctrl+A, Ctrl+C.";
-    }
-    setTimeout(() => (diagCopyStatus.value = ""), 4000);
-}
-
 // --- Hero Lab import --------------------------------------------------------
 
 const importError = ref("");
@@ -385,6 +318,15 @@ async function onFileSelected(event: Event): Promise<void> {
         character.adjustments = JSON.parse(
             JSON.stringify(data.value.adjustments ?? { enabled: [], custom: [] }),
         ) as AdjustmentState;
+        // A mutagen new to this sheet starts as Hero Lab had it (on if it was active in the export, as its
+        // effect is already in the numbers); one the sheet already knew keeps the table's choice.
+        const knownImported = new Set((data.value.importedAdjustments ?? []).map((a) => a.key));
+        for (const adj of character.importedAdjustments ?? []) {
+            if (knownImported.has(adj.key)) continue;
+            const adjState = character.adjustments;
+            adjState.enabled = adjState.enabled.filter((k) => k !== adj.key);
+            if (adj.inExport) adjState.enabled.push(adj.key);
+        }
         // And the spells picked as dice macros (with any edited formulas), for spells still there.
         const spellKeys = new Set(character.spellcasting.flatMap((sc) => sc.spells.map((s) => spellKey(sc, s))));
         const prevSpellMacros = data.value.spellMacros ?? { enabled: [], formulas: {} };
@@ -525,6 +467,12 @@ function exportCustomData(): void {
 const macroStatus = ref("");
 let macroStatusTimeout: ReturnType<typeof setTimeout> | undefined;
 
+function flashMacroStatus(text: string): void {
+    macroStatus.value = text;
+    clearTimeout(macroStatusTimeout);
+    macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+}
+
 function isMacroSkill(name: string): boolean {
     return (data.value.macroSkills ?? []).includes(name);
 }
@@ -571,28 +519,12 @@ function applyMacroChange(name: string, on: boolean): void {
             text = "Custom Data export failed - see the console.";
         }
     }
-    macroStatus.value = text || `${name}: ${on ? "added to" : "removed from"} the dice macros.`;
-    clearTimeout(macroStatusTimeout);
-    macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+    flashMacroStatus(text || `${name}: ${on ? "added to" : "removed from"} the dice macros.`);
 }
 
 // --- Adjustments (buffs, conditions) ---------------------------------------------------------------
 
-const ADJUSTMENT_GROUPS = ["Spells", "Class abilities", "Combat", "Conditions"] as const;
-const adjustmentGroups = ADJUSTMENT_GROUPS.map((group) => ({
-    group,
-    items: BUILTIN_ADJUSTMENTS.filter((a) => a.group === group),
-}));
 const activeAdjustmentNames = computed(() => enabledAdjustments(data.value).map((a) => a.name));
-
-function adjustmentState(): AdjustmentState {
-    data.value.adjustments ??= { enabled: [], custom: [] };
-    return data.value.adjustments;
-}
-
-function isAdjustmentOn(key: string): boolean {
-    return (data.value.adjustments?.enabled ?? []).includes(key);
-}
 
 /** Saves a change and re-exports Custom Data, so the numbers, rolls and dice macros follow. */
 function saveAndReexport(message: string): void {
@@ -607,50 +539,13 @@ function saveAndReexport(message: string): void {
             text = "Custom Data export failed - see the console.";
         }
     }
-    macroStatus.value = text ? `${message} ${text}` : message;
-    clearTimeout(macroStatusTimeout);
-    macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
+    flashMacroStatus(text ? `${message} ${text}` : message);
 }
 
 // --- Config tab: what the sheet shows ---------------------------------------------------------------
 
-type ConfigList = "hiddenWeapons" | "hiddenSkills" | "hiddenSections" | "hiddenTabs";
-
 function isHidden(list: ConfigList, name: string): boolean {
-    return (data.value.sheetConfig?.[list] as string[] | undefined)?.includes(name) ?? false;
-}
-
-/** Shows or hides one thing. Weapons and skills also leave the dice macros, so those re-export. */
-function setShown(list: ConfigList, name: string, shown: boolean, label = name): void {
-    const config = (data.value.sheetConfig ??= {});
-    const rest = ((config[list] as string[] | undefined) ?? []).filter((n) => n !== name);
-    (config[list] as string[]) = shown ? rest : [...rest, name];
-    const message = `${label}: ${shown ? "shown" : "hidden"}.`;
-    if (list === "hiddenWeapons" || list === "hiddenSkills") saveAndReexport(message);
-    else {
-        save();
-        macroStatus.value = message;
-        clearTimeout(macroStatusTimeout);
-        macroStatusTimeout = setTimeout(() => (macroStatus.value = ""), 6000);
-    }
-}
-
-/** Hides every skill without ranks (or shows every skill again). */
-function hideSkillsWithoutRanks(hide: boolean): void {
-    const config = (data.value.sheetConfig ??= {});
-    config.hiddenSkills = hide ? data.value.skills.filter((s) => s.ranks <= 0).map((s) => s.name) : [];
-    saveAndReexport(hide ? "Skills without ranks hidden." : "All skills shown.");
-}
-
-const configTabs = computed(() =>
-    (isCharacter.value ? BASE_TABS : LIMITED_TABS).filter((t) => HIDEABLE_TABS.includes(t)),
-);
-
-function toggleAdjustment(key: string, name: string, on: boolean): void {
-    const state = adjustmentState();
-    state.enabled = state.enabled.filter((k) => k !== key);
-    if (on) state.enabled.push(key);
-    saveAndReexport(`${name} ${on ? "on" : "off"}.`);
+    return isHiddenIn(data.value, list, name);
 }
 
 // --- Spell macros --------------------------------------------------------------------------------
@@ -712,37 +607,6 @@ function rollDefensive(sc: SpellcastingClass, spell: SpellEntry): void {
         `Cast defensively: ${spell.name} (DC ${dc})`,
         bonus ? `${checkFormula(field)} + ${bonus}` : checkFormula(field),
     );
-}
-
-const newAdjName = ref("");
-const newAdjEffects = ref<AdjustmentEffect[]>([{ target: "attack", type: "untyped", value: 1 }]);
-const ADJUSTMENT_TARGETS = Object.keys(TARGET_LABELS) as AdjustmentTarget[];
-
-function addNewEffectRow(): void {
-    newAdjEffects.value.push({ target: "attack", type: "untyped", value: 1 });
-}
-
-function addCustomAdjustment(): void {
-    const name = newAdjName.value.trim();
-    const effects = newAdjEffects.value.filter((e) => Number.isFinite(e.value) && e.value !== 0);
-    if (!name || !effects.length) {
-        macroStatus.value = "Give the adjustment a name and at least one non-zero effect.";
-        return;
-    }
-    const state = adjustmentState();
-    const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    state.custom.push({ id, name, effects: effects.map((e) => ({ ...e })) });
-    state.enabled.push(id);
-    newAdjName.value = "";
-    newAdjEffects.value = [{ target: "attack", type: "untyped", value: 1 }];
-    saveAndReexport(`${name} added and switched on.`);
-}
-
-function removeCustomAdjustment(id: string, name: string): void {
-    const state = adjustmentState();
-    state.custom = state.custom.filter((a) => a.id !== id);
-    state.enabled = state.enabled.filter((k) => k !== id);
-    saveAndReexport(`${name} removed.`);
 }
 
 /** Removes every Custom Data element this sheet wrote; elements you made by hand are untouched. */
@@ -910,10 +774,13 @@ function renameShape(id: LocalId, name: string): string {
 // number - so a value edited in PlanarAlly's Custom Data tab (a buff, a penalty) changes every roll that
 // uses it. The names come from the same builder that exports the fields (see customdata.ts).
 //
-// Two modes. "panel": the formula goes into PlanarAlly's own dice panel and you press Enter there - PA's
-// native roll, with 3D dice and the toast other players see (PA expands the fields itself). "quick":
-// rolled right here with PA's 2d engine (roll.ts expands the fields) and shown only to you; nothing is
-// sent to other players. Panel is the default because it is the one that is shared.
+// On a server with mod API 0.6 every roll goes through PlanarAlly's own roll (`api.dice`, see roll.ts):
+// "panel" shares it as the player's dice tool does, "quick" rolls it for them only.
+//
+// On an older server, two modes. "panel": the formula goes into PlanarAlly's own dice panel and you press
+// Enter there - PA's native roll, with 3D dice and the toast other players see (PA expands the fields
+// itself). "quick": rolled right here with PA's 2d engine (roll.ts expands the fields) and shown only to
+// you; nothing is sent to other players. Panel is the default because it is the one that is shared.
 function loadRollMode(): "quick" | "panel" {
     try {
         return localStorage.getItem("pf1e-sheet-roll-mode") === "quick" ? "quick" : "panel";
@@ -953,6 +820,12 @@ watch(showResultCard, (on) => {
     }
 });
 
+/**
+ * Mod API 0.6's dice API: rolls go straight through PlanarAlly's own roll (one click, shared as the
+ * player's dice tool shares, or for them only), with no dice panel and no result popup to choose.
+ */
+const nativeDice = hasNativeDice(api);
+
 const rollStatus = ref("");
 const rolling = ref(false);
 
@@ -965,6 +838,11 @@ async function doRoll(label: string, formula: string): Promise<void> {
     const shape = currentLocalId.value;
 
     const attempt = async (): Promise<string> => {
+        if (nativeDice) {
+            rollStatus.value = `Rolling ${label}...`;
+            const out = await rollNative(api, formula, { label, shape, onlyMe: rollMode.value === "quick" });
+            return `${label}: ${out.total} = ${out.expression}`;
+        }
         if (rollMode.value === "panel") {
             rollStatus.value = `Opening ${label} in PA's dice panel...`;
             await openInDicePanel(api, formula, shape);
@@ -1238,18 +1116,10 @@ watch(
     { immediate: true },
 );
 
-// --- Rule cards: the styled hover / click popover for skills, feats, spells and specials -----------
-// A card of the sheet's own (rather than the browser's plain title tooltip): the name, a details line
-// or two, and the rules text in paragraphs with "Benefit:"-style labels in bold. It follows the mouse
-// on hover; a click pins it, so long text can be scrolled, and offers PlanarAlly's compendium page
-// when the rule is registered there.
+// --- Rule cards (sheet/ruleCards.ts): the cards of this tab's skills, specials and spells ------------
 
-interface RuleCard {
-    title: string;
-    meta: string[];
-    body: string;
-    rule?: { kind: RuleKind; name: string };
-}
+const cards = createRuleCards(api);
+const { showCard, hideCard, pinCard } = cards;
 
 function skillCard(row: (typeof skillRows.value)[number]): RuleCard {
     const s = row.skill;
@@ -1270,15 +1140,6 @@ function skillCard(row: (typeof skillRows.value)[number]): RuleCard {
     };
 }
 
-function featCard(feat: FeatEntry): RuleCard {
-    return {
-        title: feat.name,
-        meta: feat.category ? [feat.category] : [],
-        body: feat.fullText || ruleText("feat", feat.name) || feat.description,
-        rule: { kind: "feat", name: feat.name },
-    };
-}
-
 function specialCard(sp: SpecialEntry): RuleCard {
     const resource = resourceForSpecial(sp);
     const meta = [sp.type, sp.source ? `from ${sp.source}` : "", resource ? resourceLabel(resource) : ""].filter(
@@ -1287,9 +1148,15 @@ function specialCard(sp: SpecialEntry): RuleCard {
     return {
         title: sp.name,
         meta: meta.length ? [meta.join(" · ")] : [],
-        body: sp.fullText || ruleText("special", sp.name) || sp.description,
+        // In the compendium under its short name (rules.ts) - or, if that entry went missing, still under the
+        // full name a sheet from before 1.1 stored it as.
+        body:
+            sp.fullText ||
+            (sp.rule ? ruleText("special", sp.rule) : "") ||
+            ruleText("special", sp.name) ||
+            sp.description,
         // A monster's specials stay on its sheet, not in the compendium.
-        rule: isCharacter.value ? { kind: "special", name: sp.name } : undefined,
+        rule: isCharacter.value ? { kind: "special", name: sp.rule ?? sp.name } : undefined,
     };
 }
 
@@ -1310,135 +1177,6 @@ function spellCard(spell: SpellEntry): RuleCard {
 /** A spell's full rules text: on the sheet (older imports or no compendium), else from the compendium. */
 function spellText(spell: SpellEntry): string {
     return spell.fullText || ruleText("spell", spell.name);
-}
-
-const card = ref<(RuleCard & { x: number; y: number; pinned: boolean; note?: string }) | null>(null);
-let cardHideTimer: ReturnType<typeof setTimeout> | undefined;
-let cardShowTimer: ReturnType<typeof setTimeout> | undefined;
-
-// How long the mouse has to rest on a name before its card appears on hover (a click shows it at once).
-// Set on the Config tab; it is a preference of whoever is looking, so it is kept per browser like the
-// sheet width, not with the character.
-const CARD_DELAY_KEY = "pf1e-sheet-card-delay";
-const CARD_DELAY_DEFAULT_S = 2;
-const CARD_DELAY_MAX_S = 10;
-
-function loadCardDelay(): number {
-    try {
-        const saved = Number(localStorage.getItem(CARD_DELAY_KEY));
-        if (localStorage.getItem(CARD_DELAY_KEY) !== null && Number.isFinite(saved)) {
-            return Math.min(CARD_DELAY_MAX_S, Math.max(0, saved));
-        }
-    } catch {
-        /* storage unavailable: the default */
-    }
-    return CARD_DELAY_DEFAULT_S;
-}
-
-/** Whether this browser plays the natural 20 / 1 animation (Config tab). */
-const critFx = ref(critFxEnabled());
-function setCritFx(on: boolean): void {
-    critFx.value = on;
-    setCritFxEnabled(on);
-    if (on) playCrit("nat20", "Preview", "this is how a natural 20 looks");
-}
-
-/** Seconds before a hover card appears. */
-const cardDelay = ref(loadCardDelay());
-
-function setCardDelay(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const value = input.valueAsNumber;
-    cardDelay.value = Number.isFinite(value) ? Math.min(CARD_DELAY_MAX_S, Math.max(0, value)) : CARD_DELAY_DEFAULT_S;
-    input.value = String(cardDelay.value);
-    try {
-        localStorage.setItem(CARD_DELAY_KEY, String(cardDelay.value));
-    } catch {
-        /* not remembered; applies for now anyway */
-    }
-}
-
-function showCard(c: RuleCard, event: MouseEvent): void {
-    if (card.value?.pinned) return;
-    clearTimeout(cardHideTimer);
-    clearTimeout(cardShowTimer);
-    const { clientX: x, clientY: y } = event;
-    // Moving from one name to the next while a card is already showing swaps it straight away.
-    if (card.value) {
-        card.value = { ...c, x, y, pinned: false };
-        return;
-    }
-    cardShowTimer = setTimeout(() => {
-        if (!card.value?.pinned) card.value = { ...c, x, y, pinned: false };
-    }, cardDelay.value * 1000);
-}
-
-function hideCard(): void {
-    clearTimeout(cardShowTimer);
-    if (!card.value || card.value.pinned) return;
-    clearTimeout(cardHideTimer);
-    // A short delay, so the mouse can move onto the card itself (to scroll it) without it vanishing.
-    cardHideTimer = setTimeout(() => {
-        if (card.value && !card.value.pinned) card.value = null;
-    }, 150);
-}
-
-function keepCard(): void {
-    clearTimeout(cardHideTimer);
-}
-
-/** A click pins the card - unless it was on a control (a Track checkbox, a button) inside the row. */
-function pinCard(c: RuleCard, event: MouseEvent): void {
-    if ((event.target as HTMLElement | null)?.closest("input, label, button")) return;
-    clearTimeout(cardHideTimer);
-    clearTimeout(cardShowTimer);
-    card.value = { ...c, x: event.clientX, y: event.clientY, pinned: true };
-}
-
-function closeCard(): void {
-    clearTimeout(cardShowTimer);
-    card.value = null;
-}
-
-onBeforeUnmount(() => {
-    clearTimeout(cardShowTimer);
-    clearTimeout(cardHideTimer);
-});
-
-const cardStyle = computed(() => {
-    const c = card.value;
-    if (!c) return {};
-    const width = Math.min(380, window.innerWidth - 16);
-    return {
-        width: `${width}px`,
-        left: `${Math.max(8, Math.min(c.x + 14, window.innerWidth - width - 8))}px`,
-        top: `${Math.max(8, Math.min(c.y + 14, window.innerHeight - 340))}px`,
-    };
-});
-
-const cardInCompendium = computed(() => {
-    const r = card.value?.rule;
-    return r !== undefined && ruleRegistered(r.kind, r.name);
-});
-
-async function openCardInCompendium(event: MouseEvent): Promise<void> {
-    const r = card.value?.rule;
-    if (!r) return;
-    const result = await openRule(api, r.kind, r.name, event);
-    if (result.ok) card.value = null;
-    else if (card.value) card.value.note = `Couldn't open it: ${result.reason}.`;
-}
-
-/** The card's paragraphs: split on blank lines (and before "Benefit:"-style lines), labels pulled out. */
-function cardParagraphs(text: string): { label: string; text: string }[] {
-    return text
-        .split(/\n\s*\n|\n(?=[A-Z][\w ()'/,-]{1,40}:\s)/)
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .map((p) => {
-            const m = /^([A-Z][\w ()'/,-]{1,40}):\s+/.exec(p);
-            return m ? { label: m[1]!, text: p.slice(m[0].length) } : { label: "", text: p };
-        });
 }
 
 const shownSkillRows = computed(() => {
@@ -1462,6 +1200,21 @@ const gearMoney = computed(() => {
 function fmt(n: number): string {
     return n >= 0 ? `+${n}` : `${n}`;
 }
+
+// What the tab components in sheet/ share (sheet/context.ts).
+provide(SHEET_CONTEXT, {
+    data,
+    view,
+    currentLocalId,
+    isCharacter,
+    isDm,
+    save,
+    macroStatus,
+    flashMacroStatus,
+    saveAndReexport,
+    setUsesLeft,
+    cards,
+});
 </script>
 
 <template>
@@ -1505,10 +1258,20 @@ function fmt(n: number): string {
         </div>
         <div class="roll-bar">
             <span class="roll-mode">
-                <label><input v-model="rollMode" type="radio" value="panel" /> PA dice panel (everyone sees it)</label>
-                <label><input v-model="rollMode" type="radio" value="quick" /> Quick roll (only you)</label>
+                <template v-if="nativeDice">
+                    <label
+                        ><input v-model="rollMode" type="radio" value="panel" /> Roll (shared as your dice tool)</label
+                    >
+                    <label><input v-model="rollMode" type="radio" value="quick" /> Roll for me only</label>
+                </template>
+                <template v-else>
+                    <label
+                        ><input v-model="rollMode" type="radio" value="panel" /> PA dice panel (everyone sees it)</label
+                    >
+                    <label><input v-model="rollMode" type="radio" value="quick" /> Quick roll (only you)</label>
+                </template>
             </span>
-            <label v-if="rollMode === 'quick'" class="roll-toggle">
+            <label v-if="rollMode === 'quick' && !nativeDice" class="roll-toggle">
                 <input v-model="showResultCard" type="checkbox" /> Result popup
             </label>
             <span v-if="rollStatus" class="roll-status">{{ rollStatus }}</span>
@@ -2096,78 +1859,8 @@ function fmt(n: number): string {
             </div>
         </div>
 
-        <div v-else-if="activeTab === 'Adjustments'" class="pf1e-panel">
-            <div class="readonly-note">
-                Ticked adjustments are added to this sheet's numbers, its roll buttons and the token's dice macros,
-                following PF1 stacking (same-type bonuses don't stack; dodge, circumstance and untyped do). Export from
-                Hero Lab with its own adjustments switched <strong>off</strong>, or they count twice.
-                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
-            </div>
-
-            <template v-for="g of adjustmentGroups" :key="g.group">
-                <h4>{{ g.group }}</h4>
-                <div class="adjustment-list">
-                    <label v-for="adj of g.items" :key="adj.key" class="adjustment">
-                        <input
-                            type="checkbox"
-                            :checked="isAdjustmentOn(adj.key)"
-                            @change="toggleAdjustment(adj.key, adj.name, ($event.target as HTMLInputElement).checked)"
-                        />
-                        <span class="adj-name">{{ adj.name }}</span>
-                        <span class="adj-effects">{{ describeEffects(adj.effects, adj.extraAttack) }}</span>
-                    </label>
-                </div>
-            </template>
-
-            <h4>Custom</h4>
-            <div v-if="data.adjustments?.custom.length" class="adjustment-list">
-                <div v-for="adj of data.adjustments.custom" :key="adj.id" class="adjustment">
-                    <input
-                        type="checkbox"
-                        :checked="isAdjustmentOn(adj.id)"
-                        @change="toggleAdjustment(adj.id, adj.name, ($event.target as HTMLInputElement).checked)"
-                    />
-                    <span class="adj-name">{{ adj.name }}</span>
-                    <span class="adj-effects">{{ describeEffects(adj.effects) }}</span>
-                    <button type="button" @click="removeCustomAdjustment(adj.id, adj.name)">Remove</button>
-                </div>
-            </div>
-            <div class="custom-adjustment-form">
-                <input v-model="newAdjName" type="text" placeholder="Name, e.g. Aid or Weapon Focus" />
-                <div v-for="(eff, i) of newAdjEffects" :key="i" class="effect-row">
-                    <input v-model.number="eff.value" type="number" class="effect-value" />
-                    <select v-model="eff.type">
-                        <option v-for="t of BONUS_TYPES" :key="t" :value="t">{{ t }}</option>
-                    </select>
-                    <select v-model="eff.target">
-                        <option v-for="t of ADJUSTMENT_TARGETS" :key="t" :value="t">{{ TARGET_LABELS[t] }}</option>
-                    </select>
-                    <button v-if="newAdjEffects.length > 1" type="button" @click="newAdjEffects.splice(i, 1)">✕</button>
-                </div>
-                <div class="hp-push-row">
-                    <button type="button" @click="addNewEffectRow">Add effect</button>
-                    <button type="button" @click="addCustomAdjustment">Add adjustment</button>
-                </div>
-            </div>
-        </div>
-
-        <div v-else-if="activeTab === 'Feats'" class="pf1e-panel">
-            <ul class="feat-list">
-                <li
-                    v-for="(feat, i) of data.feats"
-                    :key="i"
-                    class="hover-info"
-                    @mouseenter="showCard(featCard(feat), $event)"
-                    @mouseleave="hideCard"
-                    @click="pinCard(featCard(feat), $event)"
-                >
-                    <strong>{{ feat.name }}</strong>
-                    <span v-if="feat.category" class="special-source">{{ feat.category }}</span>
-                    <div class="hint">{{ feat.description }}</div>
-                </li>
-            </ul>
-        </div>
-
+        <AdjustmentsTab v-else-if="activeTab === 'Adjustments'" />
+        <FeatsTab v-else-if="activeTab === 'Feats'" />
         <div v-else-if="activeTab === 'Spells'" class="pf1e-panel">
             <div class="readonly-note">
                 Rest the mouse on a spell's name (or click it) for its rules text. Tick <strong>Macro</strong> to add a
@@ -2198,6 +1891,9 @@ function fmt(n: number): string {
                                     @mouseleave="hideCard"
                                     @click="pinCard(spellCard(spell), $event)"
                                     >{{ spell.name }}</strong
+                                >
+                                <span v-if="spell.count" class="spell-count" title="Copies prepared"
+                                    >×{{ spell.count }}</span
                                 >
                                 <div class="spell-meta">
                                     <span v-if="spell.dc" :title="spell.save">DC {{ spell.dc }}</span>
@@ -2376,1105 +2072,11 @@ function fmt(n: number): string {
             </div>
         </div>
 
-        <div v-else-if="activeTab === 'Inventory'" class="pf1e-panel">
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Item</th>
-                            <th>Qty</th>
-                            <th>Weight</th>
-                            <th>Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="(item, i) of data.inventory" :key="i">
-                            <td>{{ item.name }}</td>
-                            <td>{{ item.quantity }}</td>
-                            <td>{{ item.weight }}</td>
-                            <td>{{ item.notes }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div v-else-if="activeTab === 'Config'" class="pf1e-panel">
-            <div class="readonly-note">
-                Choose what this sheet shows; the choices are saved with the character and kept when you re-import. A
-                hidden weapon or skill is also left out of PlanarAlly's dice macros.
-                <span v-if="macroStatus" class="hp-push-status">{{ macroStatus }}</span>
-            </div>
-
-            <h4>Sheet sections</h4>
-            <div class="config-list">
-                <label v-for="[key, label] of SHEET_SECTIONS" :key="key">
-                    <input
-                        type="checkbox"
-                        :checked="!isHidden('hiddenSections', key)"
-                        @change="setShown('hiddenSections', key, ($event.target as HTMLInputElement).checked, label)"
-                    />
-                    {{ label }}
-                </label>
-            </div>
-
-            <h4>Weapons</h4>
-            <div v-if="data.combat.attacks.length" class="config-list">
-                <label v-for="(atk, i) of data.combat.attacks" :key="i">
-                    <input
-                        type="checkbox"
-                        :checked="!isHidden('hiddenWeapons', atk.name)"
-                        @change="setShown('hiddenWeapons', atk.name, ($event.target as HTMLInputElement).checked)"
-                    />
-                    {{ atk.name }} <span class="hint">{{ atk.bonus }} · {{ atk.damage }}</span>
-                </label>
-            </div>
-            <div v-else class="readonly-note">No weapons in the Hero Lab export.</div>
-
-            <h4>Skills</h4>
-            <div class="hp-push-row">
-                <button type="button" @click="hideSkillsWithoutRanks(true)">Hide skills without ranks</button>
-                <button type="button" @click="hideSkillsWithoutRanks(false)">Show all skills</button>
-            </div>
-            <div class="config-list columns">
-                <label v-for="skill of data.skills" :key="skill.name">
-                    <input
-                        type="checkbox"
-                        :checked="!isHidden('hiddenSkills', skill.name)"
-                        @change="setShown('hiddenSkills', skill.name, ($event.target as HTMLInputElement).checked)"
-                    />
-                    {{ skill.name }}
-                </label>
-            </div>
-
-            <h4>Rule cards</h4>
-            <div class="config-list">
-                <label>
-                    Show a rule card after hovering a skill, feat, spell or special for
-                    <input
-                        class="delay-input"
-                        type="number"
-                        min="0"
-                        :max="CARD_DELAY_MAX_S"
-                        step="0.5"
-                        :value="cardDelay"
-                        @change="setCardDelay"
-                    />
-                    seconds
-                </label>
-                <span class="hint"
-                    >0 shows it at once. Saved for this browser, for every sheet; clicking a name always shows its
-                    card.</span
-                >
-            </div>
-
-            <h4>Natural 20 / natural 1</h4>
-            <div class="config-list">
-                <label>
-                    <input
-                        type="checkbox"
-                        :checked="critFx"
-                        @change="setCritFx(($event.target as HTMLInputElement).checked)"
-                    />
-                    Play an animation when any d20 roll comes up a natural 20 or a natural 1
-                </label>
-                <span class="hint"
-                    >Any d20 roll you see - the dice panel, rolls shared with you, this sheet's rolls. Saved for this
-                    browser.</span
-                >
-            </div>
-
-            <h4>Tabs</h4>
-            <div class="config-list">
-                <label v-for="tab of configTabs" :key="tab">
-                    <input
-                        type="checkbox"
-                        :checked="!isHidden('hiddenTabs', tab)"
-                        @change="setShown('hiddenTabs', tab, ($event.target as HTMLInputElement).checked, `${tab} tab`)"
-                    />
-                    {{ tab }}
-                </label>
-            </div>
-        </div>
-
-        <div v-else-if="activeTab === 'Diagnostics' && isDm" class="pf1e-panel">
-            <div class="readonly-note">Both reports are read-only. Copy the output into a bug report.</div>
-
-            <div class="diag-buttons">
-                <button
-                    type="button"
-                    :disabled="diagBusy"
-                    title="Checks the API functions the sheet uses, this token's HP tracker, Custom Data, roll formulas and auras"
-                    @click="runDiag(() => buildHealthCheck(api, currentLocalId, data))"
-                >
-                    Health check
-                </button>
-                <button
-                    type="button"
-                    :disabled="diagBusy"
-                    title="Everything PlanarAlly's mod API exposes, plus a scan of PlanarAlly's code. Large; for when an update breaks something"
-                    @click="runDiag(() => buildApiDump(api, currentLocalId))"
-                >
-                    Full API dump
-                </button>
-            </div>
-
-            <div class="diag-buttons">
-                <button type="button" :disabled="!diagOutput" @click="copyDiag">Copy</button>
-                <button type="button" @click="diagOutput = ''">Clear</button>
-                <span v-if="diagBusy" class="hp-push-status">working...</span>
-                <span v-if="diagCopyStatus" class="hp-push-status">{{ diagCopyStatus }}</span>
-            </div>
-            <textarea ref="diagTextarea" class="diag-output" readonly :value="diagOutput"></textarea>
-        </div>
-
-        <Teleport to="body">
-            <div
-                v-if="card"
-                class="pf1e-rule-card"
-                :class="{ pinned: card.pinned }"
-                :style="cardStyle"
-                @mouseenter="keepCard"
-                @mouseleave="hideCard"
-            >
-                <div class="rc-head">
-                    <strong>{{ card.title }}</strong>
-                    <button v-if="card.pinned" type="button" title="Close" @click="closeCard">✕</button>
-                </div>
-                <div v-for="(m, i) of card.meta" :key="i" class="rc-meta">{{ m }}</div>
-                <div class="rc-body">
-                    <p v-for="(p, i) of cardParagraphs(card.body)" :key="i">
-                        <strong v-if="p.label">{{ p.label }}:</strong> {{ p.text }}
-                    </p>
-                    <p v-if="!card.body" class="rc-empty">No rules text in this import.</p>
-                </div>
-                <div class="rc-foot">
-                    <span v-if="card.note" class="rc-note">{{ card.note }}</span>
-                    <button
-                        v-if="card.pinned && card.rule && rulesReady"
-                        type="button"
-                        :title="
-                            cardInCompendium
-                                ? 'Open this rule\'s page in the compendium'
-                                : 'Not found in the compendium yet'
-                        "
-                        @click="openCardInCompendium"
-                    >
-                        Open in compendium
-                    </button>
-                    <span v-if="!card.pinned">Click to pin</span>
-                </div>
-            </div>
-        </Teleport>
+        <InventoryTab v-else-if="activeTab === 'Inventory'" />
+        <ConfigTab v-else-if="activeTab === 'Config'" />
+        <DiagnosticsTab v-else-if="activeTab === 'Diagnostics' && isDm" />
+        <RuleCardPopup />
     </div>
 </template>
 
-<style scoped lang="scss">
-#pf1e-sheet {
-    box-sizing: border-box;
-    // An explicit width (S/M/L, set from the tab row). PlanarAlly sizes the dialog to its content, so
-    // a percentage width would not stop a long line of text from stretching it to the screen edge.
-    width: var(--pf1e-width, 40rem);
-    // ...but never wider than the screen, leaving room for the dialog's own left-hand tab list.
-    max-width: calc(100vw - 12rem);
-    height: 100%;
-    // Cap to the viewport so the sheet scrolls internally instead of overflowing the dialog.
-    max-height: calc(100vh - 8rem);
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding: 1rem;
-    background-color: white;
-    font-size: 0.9rem;
-    overflow-wrap: anywhere;
-    // Paper-sheet colours: ink for bars, labels and box borders; a light fill for the totals.
-    --pf1e-ink: #111;
-    --pf1e-total: #fff6c8;
-    --pf1e-total-hover: #ffe58a;
-
-    *,
-    *::before,
-    *::after {
-        box-sizing: border-box;
-    }
-
-    input {
-        min-width: 0;
-        max-width: 100%;
-    }
-
-    // Read-only values are plain text (not disabled inputs): a form control has an intrinsic width of
-    // ~170px, which is what used to stretch the tables, and text simply wraps.
-    .val {
-        display: block;
-        font-size: 0.9rem;
-        color: #222;
-        min-height: 1.2em;
-    }
-
-    // PA has global styles that can leak in; force plain block flow for content containers.
-    .pf1e-panel {
-        display: block;
-        width: 100%;
-    }
-
-    // Section headings are the paper sheet's black bars, on every tab.
-    h4,
-    .bar {
-        display: block;
-        margin: 0.75rem 0 0.35rem;
-        padding: 0.1rem 0.6rem;
-        border-radius: 0.6rem 0.6rem 0 0;
-        background: var(--pf1e-ink);
-        color: #fff;
-        font-size: 0.8rem;
-        font-weight: 800;
-        letter-spacing: 0.05em;
-        text-align: center;
-        text-transform: uppercase;
-    }
-
-    .bar {
-        position: relative;
-        margin: 0 0 0.3rem;
-    }
-
-    // --- Sheet tab: the paper front page -----------------------------------------------------------
-    .paper {
-        .id-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
-            gap: 0.3rem 0.8rem;
-            margin-bottom: 0.4rem;
-        }
-
-        .id-field {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-
-            &.wide {
-                grid-column: 1 / -1;
-            }
-
-            .id-val {
-                border-bottom: 1px solid var(--pf1e-ink);
-                font-size: 0.85rem;
-                min-height: 1.2em;
-            }
-
-            .cap {
-                max-width: none;
-                text-align: left;
-            }
-        }
-
-        .paper-hint {
-            margin-bottom: 0.6rem;
-            color: #666;
-            font-size: 0.72rem;
-            font-style: italic;
-        }
-
-        .paper-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-            gap: 0.8rem 1rem;
-            align-items: start;
-        }
-
-        .block {
-            min-width: 0;
-
-            &.full {
-                grid-column: 1 / -1;
-            }
-        }
-
-        .block-text {
-            margin-bottom: 0.5rem;
-            font-size: 0.82rem;
-        }
-
-        .small-note {
-            margin: 0 0 0.35rem;
-            color: #444;
-            font-size: 0.7rem;
-
-            &.inline {
-                margin: 0 0 0 0.4rem;
-            }
-        }
-
-        .cap {
-            display: block;
-            max-width: 4rem;
-            margin-top: 0.05rem;
-            color: #444;
-            font-size: 0.5rem;
-            font-weight: 600;
-            line-height: 1;
-            text-align: center;
-            text-transform: uppercase;
-        }
-
-        // A black label: "STR" over a tiny "Strength".
-        .tag {
-            display: inline-flex;
-            flex: 0 0 auto;
-            flex-direction: column;
-            justify-content: center;
-            min-width: 3.4rem;
-            min-height: 1.7rem;
-            padding: 0.1rem 0.3rem;
-            background: var(--pf1e-ink);
-            color: #fff;
-            font-size: 0.85rem;
-            font-weight: 800;
-            line-height: 1;
-            text-align: center;
-            text-transform: uppercase;
-
-            &.wide {
-                min-width: 5.6rem;
-            }
-
-            small {
-                margin-top: 0.1rem;
-                font-size: 0.45rem;
-                font-weight: 600;
-                letter-spacing: 0.02em;
-            }
-        }
-
-        // A boxed number, as on the paper sheet; highlighted when it is a total (and clickable to roll).
-        .box {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 2.2rem;
-            height: 1.6rem;
-            padding: 0 0.25rem;
-            border: 1.5px solid var(--pf1e-ink);
-            background: #fff;
-            color: var(--pf1e-ink);
-            font: inherit;
-            font-size: 0.9rem;
-            font-weight: 700;
-            white-space: nowrap;
-
-            &.total {
-                background: var(--pf1e-total);
-            }
-
-            &.temp {
-                background: #fde7c7;
-            }
-        }
-
-        button.box {
-            cursor: pointer;
-
-            &:hover:not(:disabled) {
-                background: var(--pf1e-total-hover);
-            }
-        }
-
-        input.box.hp-current {
-            width: 3.6rem;
-            text-align: center;
-        }
-
-        .cell {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .op {
-            align-self: flex-start;
-            padding: 0.25rem 0.05rem 0;
-            font-size: 0.8rem;
-            font-weight: 700;
-            white-space: nowrap;
-        }
-
-        .stat-line {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: flex-start;
-            gap: 0.25rem 0.3rem;
-            margin-bottom: 0.45rem;
-        }
-
-        .macro-box {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.1rem;
-            align-self: center;
-            margin-left: auto;
-            font-size: 0.65rem;
-            font-weight: 700;
-
-            &.on-bar {
-                position: absolute;
-                top: 50%;
-                right: 0.5rem;
-                transform: translateY(-50%);
-                color: #fff;
-            }
-        }
-
-        .ability-head,
-        .ability-line {
-            display: grid;
-            grid-template-columns: 4.6rem repeat(4, 2.6rem);
-            gap: 0.25rem;
-            align-items: center;
-            margin-bottom: 0.2rem;
-        }
-
-        .ability-line .tag {
-            min-width: 0;
-        }
-
-        .weapon-table {
-            width: 100%;
-            border: 1.5px solid var(--pf1e-ink);
-            border-collapse: collapse;
-
-            td {
-                padding: 0.1rem 0.3rem;
-                border: 1px solid var(--pf1e-ink);
-                font-size: 0.82rem;
-                vertical-align: middle;
-            }
-
-            tr.caps td {
-                padding: 0 0.3rem;
-                background: var(--pf1e-ink);
-                color: #fff;
-                font-size: 0.5rem;
-                font-weight: 700;
-                text-align: center;
-                text-transform: uppercase;
-            }
-
-            .w-name {
-                width: 45%;
-                font-weight: 700;
-            }
-
-            .w-attack .box {
-                margin-right: 0.2rem;
-            }
-
-            .box.dmg {
-                min-width: 3rem;
-            }
-        }
-
-        .paper-table {
-            th {
-                border-bottom: 1.5px solid var(--pf1e-ink);
-                font-size: 0.6rem;
-                text-transform: uppercase;
-            }
-
-            th,
-            td {
-                padding: 0.15rem 0.25rem;
-                overflow-wrap: normal;
-            }
-
-            td {
-                border-bottom: 1px dotted #999;
-                font-size: 0.82rem;
-                vertical-align: middle;
-            }
-
-            .num {
-                text-align: center;
-            }
-
-            .flags {
-                width: 1rem;
-                min-width: 0;
-                text-align: center;
-            }
-
-            .flag {
-                margin-left: 0.2rem;
-                padding: 0 0.15rem;
-                border: 1px solid #999;
-                color: #555;
-                font-size: 0.55rem;
-                font-weight: 700;
-            }
-
-            .box {
-                min-width: 2rem;
-                height: 1.3rem;
-                font-size: 0.8rem;
-            }
-
-            .temp-inline {
-                color: #a35a00;
-                font-weight: 700;
-            }
-
-            .skill-name {
-                cursor: help;
-            }
-
-            .skill-ability {
-                margin-left: 0.2rem;
-                color: #666;
-                font-size: 0.6rem;
-            }
-
-            th {
-                white-space: nowrap;
-            }
-        }
-    }
-
-    ul,
-    li {
-        display: block;
-        width: 100%;
-    }
-
-    .pf1e-header {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        align-items: center;
-        margin-bottom: 0.5rem;
-
-        .char-name {
-            flex: 1 1 10rem;
-            min-width: 0;
-            font-size: 1.05rem;
-            font-weight: bold;
-        }
-
-        .sheet-kind {
-            margin-left: 0.4rem;
-            font-size: 0.7rem;
-            font-weight: normal;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        button {
-            flex: 0 0 auto;
-        }
-    }
-
-    .error {
-        color: #b00020;
-        margin-bottom: 0.5rem;
-    }
-
-    .imported-at {
-        color: #666;
-        font-size: 0.8rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .diag-buttons {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.4rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .diag-output {
-        display: block;
-        width: 100%;
-        height: 22rem;
-        font-family: monospace;
-        font-size: 0.7rem;
-        white-space: pre-wrap;
-        overflow: auto;
-        resize: vertical;
-    }
-
-    .dismissable {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.5rem;
-
-        span {
-            flex: 1 1 auto;
-        }
-
-        button {
-            flex: 0 0 auto;
-        }
-    }
-
-    .update-banner {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.3rem 0.5rem;
-        margin-bottom: 0.5rem;
-        border: 1px solid #3b82f6;
-        border-radius: 4px;
-        background: #eff6ff;
-        font-size: 0.8rem;
-
-        button {
-            margin-left: auto;
-        }
-    }
-
-    .adjusted-note {
-        color: #8a4b00;
-        font-size: 0.8rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .adjustment-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-        margin-bottom: 0.4rem;
-    }
-
-    .adjustment {
-        display: flex;
-        align-items: baseline;
-        gap: 0.4rem;
-        font-size: 0.85rem;
-
-        .adj-name {
-            flex: 0 0 auto;
-            font-weight: bold;
-        }
-
-        .adj-effects {
-            flex: 1 1 auto;
-            color: #555;
-            font-size: 0.75rem;
-        }
-    }
-
-    .spell-rows {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-    }
-
-    .spell-row {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 0.25rem 0.75rem;
-        padding: 0.35rem 0;
-        border-bottom: 1px solid #ddd;
-
-        .spell-main {
-            flex: 1 1 14rem;
-            min-width: 0;
-        }
-
-        .spell-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0 0.6rem;
-            color: #555;
-            font-size: 0.75rem;
-
-            .defensive {
-                white-space: nowrap;
-            }
-
-            .def-roll {
-                margin-left: 0.2rem;
-                padding: 0 0.3rem;
-                font-size: 0.7rem;
-            }
-        }
-
-        .spell-controls {
-            flex: 0 0 auto;
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-            white-space: nowrap;
-            font-size: 0.8rem;
-        }
-
-        .spell-formula {
-            width: 5.5rem;
-        }
-    }
-
-    .track-toggle {
-        margin-right: 0.35rem;
-        font-size: 0.75rem;
-        white-space: nowrap;
-    }
-
-    .uses-left {
-        white-space: nowrap;
-
-        input {
-            width: 3.5rem;
-            text-align: center;
-        }
-
-        button {
-            padding: 0 0.4rem;
-        }
-    }
-
-    .config-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-        margin-bottom: 0.5rem;
-        font-size: 0.85rem;
-
-        &.columns {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-        }
-
-        .hint {
-            color: #666;
-            font-size: 0.75rem;
-        }
-
-        .delay-input {
-            width: 4rem;
-            margin: 0 0.25rem;
-        }
-    }
-
-    .custom-adjustment-form {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        margin-top: 0.3rem;
-
-        .effect-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.3rem;
-        }
-
-        .effect-value {
-            width: 4rem;
-        }
-    }
-
-    .readonly-note {
-        color: #666;
-        font-size: 0.75rem;
-        font-style: italic;
-        margin-bottom: 0.75rem;
-    }
-
-    .pf1e-tabs {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.25rem;
-        border-bottom: 1px solid #ccc;
-        margin-bottom: 0.75rem;
-
-        button {
-            background: none;
-            border: none;
-            padding: 0.4rem 0.75rem;
-            cursor: pointer;
-
-            &.active {
-                border-bottom: 2px solid #333;
-                font-weight: bold;
-            }
-        }
-    }
-
-    .size-toggle {
-        margin-left: auto;
-        display: flex;
-        gap: 0.1rem;
-        align-self: center;
-
-        button {
-            padding: 0.2rem 0.45rem;
-            font-size: 0.7rem;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-            background: #f4f4f4;
-
-            &.active {
-                background: #333;
-                color: #fff;
-                border-color: #333;
-                border-bottom-width: 1px; // the tab buttons' 2px underline must not leak in
-                font-weight: bold;
-            }
-        }
-    }
-
-    .roll-mode {
-        display: flex;
-        gap: 0.7rem;
-    }
-
-    .roll-bar {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.6rem;
-        margin-bottom: 0.6rem;
-        font-size: 0.8rem;
-
-        .roll-toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-            color: #555;
-        }
-
-        .roll-status {
-            font-weight: bold;
-        }
-    }
-
-    .roll-cell {
-        white-space: nowrap;
-
-        button {
-            margin-right: 0.25rem;
-        }
-    }
-
-    .hp-push-row {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        margin-bottom: 0.75rem;
-
-        .hp-push-status {
-            font-size: 0.8rem;
-            color: #555;
-        }
-    }
-
-    // Tables scroll sideways inside their own container rather than widening the whole sheet.
-    .table-wrap {
-        max-width: 100%;
-        overflow-x: auto;
-        margin-bottom: 1rem;
-    }
-
-    table {
-        width: 100%;
-        border-collapse: collapse;
-
-        th,
-        td {
-            text-align: left;
-            padding: 0.2rem 0.4rem;
-            border-bottom: 1px dotted #999;
-            vertical-align: top;
-        }
-
-        // Paper-sheet column headings: small capitals over an ink rule.
-        th {
-            border-bottom: 1.5px solid var(--pf1e-ink);
-            font-size: 0.6rem;
-            text-transform: uppercase;
-            white-space: nowrap;
-        }
-
-        // The first column is usually a name; let it wrap rather than force a wide table.
-        td:first-child {
-            min-width: 5rem;
-        }
-    }
-
-    // Native title-attribute tooltip trigger. Deliberately not a custom CSS popup: this
-    // server has already shown global styles can leak into our elements in surprising ways
-    // (see the earlier feats-as-columns bug), and the browser's own tooltip is immune to that.
-    .hover-info {
-        cursor: help;
-    }
-
-    .info-icon {
-        display: inline-block;
-        margin-left: 0.3rem;
-        color: #888;
-        cursor: help;
-        font-size: 0.85em;
-    }
-
-    .feat-list,
-    .spell-list {
-        list-style: none;
-        padding: 0;
-        margin: 0 0 0.75rem;
-
-        li {
-            margin-bottom: 0.4rem;
-        }
-
-        .hint {
-            color: #666;
-            font-size: 0.8rem;
-        }
-    }
-
-    .spell-class {
-        margin-bottom: 1rem;
-
-        .spell-class-header {
-            margin-bottom: 0.2rem;
-        }
-
-        .spells-per-day {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            color: #555;
-            font-size: 0.8rem;
-            margin-bottom: 0.4rem;
-        }
-    }
-
-    .special-group {
-        margin-bottom: 0.9rem;
-
-        h5 {
-            display: block;
-            margin: 0 0 0.25rem;
-            font-size: 0.8rem;
-            font-weight: bold;
-            color: #444;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-    }
-
-    .special-source {
-        margin-left: 0.4rem;
-        font-size: 0.75rem;
-        color: #777;
-        font-style: italic;
-    }
-
-    .spell-level-group {
-        margin-bottom: 0.5rem;
-
-        h5 {
-            display: block;
-            margin: 0 0 0.2rem;
-            font-size: 0.8rem;
-            font-weight: bold;
-            color: #444;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-    }
-}
-
-// The rule card is teleported to <body> (a dialog's transform would otherwise offset a fixed
-// position), so it is styled here, outside #pf1e-sheet, with every property it relies on set
-// explicitly against PlanarAlly's global styles.
-.pf1e-rule-card {
-    position: fixed;
-    z-index: 10000;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    max-height: 320px;
-    border: 2px solid #111;
-    border-radius: 0.6rem 0.6rem 0.2rem 0.2rem;
-    background: #fffdf5;
-    color: #111;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
-    font-family: inherit;
-    font-size: 0.82rem;
-    line-height: 1.35;
-    text-align: left;
-    pointer-events: auto;
-
-    .rc-head {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.2rem 0.6rem;
-        border-radius: 0.45rem 0.45rem 0 0;
-        background: #111;
-        color: #fff;
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-
-        strong {
-            flex: 1 1 auto;
-        }
-
-        button {
-            border: none;
-            background: none;
-            color: #fff;
-            cursor: pointer;
-            font-size: 0.85rem;
-        }
-    }
-
-    .rc-meta {
-        padding: 0.15rem 0.6rem 0;
-        color: #444;
-        font-size: 0.72rem;
-        font-style: italic;
-    }
-
-    .rc-body {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        padding: 0.3rem 0.6rem;
-
-        p {
-            margin: 0 0 0.4rem;
-            white-space: pre-line;
-        }
-
-        .rc-empty {
-            color: #777;
-            font-style: italic;
-        }
-    }
-
-    .rc-foot {
-        display: flex;
-        justify-content: flex-end;
-        gap: 0.4rem;
-        padding: 0.2rem 0.6rem 0.3rem;
-        border-top: 1px solid #ddd;
-        color: #777;
-        font-size: 0.68rem;
-
-        &:empty {
-            display: none;
-        }
-
-        .rc-note {
-            flex: 1 1 auto;
-            color: #a00;
-        }
-    }
-
-    &.pinned {
-        border-color: #7a2940;
-    }
-}
-</style>
+<style lang="scss" src="./sheet/sheet.scss"></style>

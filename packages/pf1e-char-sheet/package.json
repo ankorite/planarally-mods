@@ -1,6 +1,6 @@
 {
     "name": "@planarally/pf1e-char-sheet",
-    "version": "1.0.0",
+    "version": "1.1.0-beta.1",
     "private": true,
     "license": "MIT",
     "files": [
@@ -26,7 +26,7 @@
         "test": "vitest run"
     },
     "dependencies": {
-        "@planarally/mod-api": "^0.4.0",
+        "@planarally/mod-api": "^0.6.0",
         "vue": "^3.5.43"
     },
     "devDependencies": {

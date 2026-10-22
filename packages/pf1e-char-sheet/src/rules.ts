@@ -1,4 +1,4 @@
-import type { CompendiumEntry, DataBlock, GameApi } from "@planarally/mod-api";
+import type { CompendiumEntry, CompendiumRecord, DataBlock, GameApi } from "@planarally/mod-api";
 import { nextTick, ref, toRaw, watch } from "vue";
 
 import type { PF1Character } from "./data";
@@ -20,6 +20,13 @@ import { guessSpellFormula } from "./spells";
 // Feats, spells and skills go there, and a character's specials (class features, racial traits, magic
 // item abilities). A monster's or NPC's specials stay on its own DM-only sheet, so its abilities never
 // show up in the players' compendium.
+//
+// A special's name carries what changes as the character levels ("Trap Sense +2 (Ex)", "Smite Evil
+// (2/day)"), so it is stored under the name without those parts ("Trap Sense"), and the sheet remembers
+// that name (SpecialEntry.rule): a level-up finds the same entry instead of adding another. Two
+// different texts under one such name (an investigator's Mutagen discovery and Mutagen ability) get the
+// source added ("Mutagen (Investigator)"), else the full name. Entries stored under full names before
+// 1.1 stay readable, but one whose text is also under its short name isn't listed in the compendium.
 //
 // A server without the compendium keeps the text on each sheet, as before.
 
@@ -46,7 +53,27 @@ const SHARDS = 32;
 const LEGACY_BLOCK = { category: "room", name: "pf1e-rules" } as const;
 const shardRepr = (i: number) => ({ category: "room", name: `pf1e-rules-${String(i).padStart(2, "0")}` }) as const;
 
-type RuleData = { entries: Record<string, CompendiumEntry> };
+/**
+ * A rule as stored in the room blocks. This is the sheet's own format (the compendium entry of mod API
+ * 0.4, kind included), kept as it is so blocks written by any version stay readable; `register` turns it
+ * into a compendium entry.
+ */
+interface StoredRule {
+    id: string;
+    name: string;
+    kind: RuleKind;
+    path?: string[];
+    group?: Record<string, string>;
+    body: string;
+}
+
+type RuleData = { entries: Record<string, StoredRule> };
+
+/**
+ * The compendium schema's system (mod API 0.6): with the rule's kind it says what an entry is, so other
+ * mods can find PF1e feats or spells with `compendium.getEntries("pf1e", "feat")`.
+ */
+const SYSTEM = "pf1e";
 
 let shards: DataBlock<RuleData>[] = [];
 let legacy: DataBlock<RuleData> | undefined;
@@ -110,23 +137,62 @@ export function ruleId(kind: RuleKind, name: string): string {
     return `${kind}-${slug || "unnamed"}`;
 }
 
+/**
+ * A special's name without what changes with level: parenthesised parts and a trailing number, bonus or
+ * dice. "Trap Sense +2 (Ex)" -> "Trap Sense", "Studied Strike +2d6 (Ex)" -> "Studied Strike",
+ * "Mythic Power (5/day, Surge +1d6)" -> "Mythic Power", "Cape of free will +2/+3" -> "Cape of free will".
+ */
+export function specialRuleName(name: string): string {
+    const short = name
+        .replace(/\s*\([^)]*\)/g, "")
+        .replace(/\s+[+-]?\d+(?:d\d+)?(?:\/[+-]?\d+)*\s*$/i, "")
+        .trim();
+    return short || name.trim();
+}
+
 /** This client's copy of a rule: from its shard, else from the pre-1.0 block. Reactive. */
-function localEntry(id: string): CompendiumEntry | undefined {
+function localEntry(id: string): StoredRule | undefined {
     return shards[shardOf(id)]?.reactiveData.value.entries[id] ?? legacy?.reactiveData.value.entries[id] ?? undefined;
 }
 
 /** Every rule this client has: the pre-1.0 block's, overridden by the shards'. */
-function allEntries(): CompendiumEntry[] {
-    const byId = new Map<string, CompendiumEntry>();
+function allEntries(): StoredRule[] {
+    const byId = new Map<string, StoredRule>();
     for (const e of Object.values(legacy?.data.entries ?? {})) byId.set(e.id, e);
     for (const shard of shards) for (const e of Object.values(shard.data.entries)) byId.set(e.id, e);
     return [...byId.values()];
 }
 
+/**
+ * The entries to list in the compendium: all of them, except a special stored under its full name before
+ * 1.1 when the same text is also stored under a shorter name (the one the sheets use now).
+ */
+export function listedEntries(entries: StoredRule[]): StoredRule[] {
+    const shortest = new Map<string, StoredRule>();
+    for (const e of entries) {
+        if (e.kind !== "special") continue;
+        const key = `${specialRuleName(e.name)}\u0000${e.body}`;
+        const seen = shortest.get(key);
+        if (!seen || e.name.length < seen.name.length) shortest.set(key, e);
+    }
+    return entries.filter(
+        (e) => e.kind !== "special" || shortest.get(`${specialRuleName(e.name)}\u0000${e.body}`) === e,
+    );
+}
+
+/**
+ * A stored rule as a compendium entry: with mod API 0.6's schema, and still with the `kind` that servers
+ * from before it (mod API 0.4 / 0.5) read.
+ */
+function toCompendiumEntry(rule: StoredRule): CompendiumEntry {
+    const { kind, ...rest } = rule;
+    return { ...rest, schema: { system: SYSTEM, kind }, ...({ kind } as object) };
+}
+
 function register(api: GameApi): void {
     unregister?.();
     unregister = undefined;
-    const entries = allEntries();
+    const entries = listedEntries(allEntries()).map(toCompendiumEntry);
     if (!entries.length) return;
     unregister = api.compendium.register(entries, {
         name: BOOK,
@@ -219,10 +285,27 @@ export function rulesStatus(api: GameApi): string {
 }
 
 /**
+ * The rule as PlanarAlly's compendium has it registered, through mod API 0.6's `getEntries`. Undefined on
+ * an older server (then the compendium system is asked directly, if PlanarAlly hands it to mods).
+ */
+function registeredRecord(kind: RuleKind, name: string): CompendiumRecord | undefined {
+    const getEntries = (gameApi?.compendium as Partial<GameApi["compendium"]> | undefined)?.getEntries;
+    if (typeof getEntries !== "function") return undefined;
+    const id = ruleId(kind, name);
+    try {
+        return getEntries.call(gameApi!.compendium, SYSTEM, kind).find((e) => e.id === id && e.mod === modTag);
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * PlanarAlly's reference to a registered rule: "<mod tag>/<id>", or - should PlanarAlly prefix it
  * differently - whatever reference its entry list gives the entry with this id in this mod's book.
  */
 function registeredRef(kind: RuleKind, name: string): string | undefined {
+    const record = registeredRecord(kind, name);
+    if (record) return record.ref;
     const compendium = compendiumSystem(gameApi);
     const direct = ruleRef(kind, name);
     if (compendium?.getEntry?.(direct)) return direct;
@@ -235,6 +318,8 @@ function registeredRef(kind: RuleKind, name: string): string | undefined {
  * registered); falls back to the campaign's rules block that feeds it, which is the same text.
  */
 export function ruleText(kind: RuleKind, name: string): string {
+    const record = registeredRecord(kind, name);
+    if (record) return record.body;
     const ref = registeredRef(kind, name);
     const fromCompendium = ref ? compendiumSystem(gameApi)?.getEntry?.(ref)?.body : undefined;
     return fromCompendium ?? localEntry(ruleId(kind, name))?.body ?? "";
@@ -363,7 +448,7 @@ export function moveRulesToCompendium(
     }
     if (!shards.length) return { added: 0, stripped: 0 };
 
-    const pending = new Map<number, Record<string, CompendiumEntry>>();
+    const pending = new Map<number, Record<string, StoredRule>>();
     let added = 0;
     let stripped = 0;
     /** Stores the rule if needed; returns whether its text may come off the sheet. */
@@ -399,11 +484,36 @@ export function moveRulesToCompendium(
         if (put("skill", skill.name, skill.description ?? "")) delete skill.description;
     }
     if (withSpecials) {
+        const current = (name: string): StoredRule | undefined => {
+            const id = ruleId("special", name);
+            return pending.get(shardOf(id))?.[id] ?? localEntry(id);
+        };
         for (const sp of character.specials ?? []) {
+            // The text: on the sheet, else (a sheet from before 1.1, its text already moved) in the entry
+            // it was stored under.
+            const body = sp.fullText || (sp.rule ? current(sp.rule)?.body : undefined) || current(sp.name)?.body || "";
+            if (!body) continue;
+            // The name to keep it under: the one this sheet already uses, the short name, the short name
+            // with its source, or the full name - the first that is free or already holds this text.
+            const short = specialRuleName(sp.name);
+            const names = [sp.rule, short, sp.source ? `${short} (${sp.source})` : undefined].filter(
+                (n): n is string => !!n,
+            );
+            const name =
+                names.find((n) => {
+                    const e = current(n);
+                    return !e || e.body === body;
+                }) ?? sp.name;
             const group: Record<string, string> = {};
             if (sp.category) group["category"] = sp.category;
             if (sp.source) group["source"] = sp.source;
-            if (put("special", sp.name, sp.fullText, Object.keys(group).length ? group : undefined)) sp.fullText = "";
+            const onSheet = sp.fullText !== "";
+            if (put("special", name, body, Object.keys(group).length ? group : undefined)) {
+                if (onSheet) sp.fullText = "";
+                else stripped--; // its text was already off this sheet
+            }
+            if (name === sp.name) delete sp.rule;
+            else sp.rule = name;
         }
     }
 

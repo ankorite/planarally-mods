@@ -369,6 +369,21 @@ export function removeCustomData(api: GameApi, shape: LocalId): CdOutcome {
 const LEASE_KEY = "pf1e-sheet";
 
 export function holdCustomDataLease(api: GameApi, shape: LocalId): () => void {
+    // Mod API 0.6: loadAndDropState(ids, source) sets the shapes a source holds; an empty set releases.
+    const typed = (api.systems as Partial<GameApi["systems"]>).customData;
+    if (typeof typed?.loadAndDropState === "function") {
+        typed.loadAndDropState(new Set([shape]), LEASE_KEY);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            try {
+                typed.loadAndDropState(new Set(), LEASE_KEY);
+            } catch {
+                /* nothing useful to do if PA objects to a release */
+            }
+        };
+    }
     const cd = (
         api.systems as unknown as {
             customData?: {

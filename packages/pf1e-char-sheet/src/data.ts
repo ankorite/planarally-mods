@@ -68,6 +68,21 @@ export interface CustomAdjustment {
     effects: AdjustmentEffect[];
 }
 
+/**
+ * An adjustment read from the Hero Lab export rather than picked from the built-in list: an alchemist's
+ * or investigator's mutagen ("Mutagen: +4 Dex, -2 Wis, +2 Nat AC"), or an investigator's Studied Combat.
+ * `inExport` says whether Hero Lab had it active, so its effect is already in the imported numbers:
+ * then switching it off on the sheet takes it out of them, and switching it on adds nothing.
+ */
+export interface ImportedAdjustment {
+    key: string;
+    name: string;
+    effects: AdjustmentEffect[];
+    inExport: boolean;
+    /** The resource a use of it spends (the mutagen's own tracked resource): switching it on uses one. */
+    resource?: string;
+}
+
 export interface AdjustmentState {
     /** Keys of the enabled adjustments: built-in keys, or custom ids. */
     enabled: string[];
@@ -150,6 +165,10 @@ export interface AttackEntry {
     kind?: "melee" | "ranged";
     /** Wielded in both hands (Hero Lab's equipped="bothhands"): 1.5x Strength to damage. Optional. */
     twoHanded?: boolean;
+    /** Attacks with Dex instead of Str (Weapon Finesse and the like), as worked out at import. Optional. */
+    finesse?: boolean;
+    /** Adds Dex instead of Str to damage (Fencing Grace, Slashing Grace, Dervish Dance, agile). Optional. */
+    dexDamage?: boolean;
 }
 
 export interface SkillEntry {
@@ -201,6 +220,8 @@ export interface SpellEntry {
      * the compendium rather than on the sheet (rules.ts). Optional for older saves.
      */
     guess?: string;
+    /** How many copies are prepared, from Hero Lab's "Cat's Grace (x2)". Absent for one. */
+    count?: number;
 }
 
 export interface SpellcastingClass {
@@ -246,6 +267,11 @@ export interface SpecialEntry {
     description: string;
     /** Full rules text, shown on hover. */
     fullText: string;
+    /**
+     * The name its rules text has in the compendium (rules.ts), when that isn't `name`: "Trap Sense" for
+     * "Trap Sense +2 (Ex)", so a level-up doesn't add another entry. Absent before 1.1.
+     */
+    rule?: string;
 }
 
 /** Groups specials by category, keeping the order in which each category first appears. */
@@ -395,6 +421,8 @@ export type PF1Character = {
      * Optional because characters saved before this existed don't have it.
      */
     adjustments?: AdjustmentState;
+    /** Adjustments found in the export (mutagens); see ImportedAdjustment. */
+    importedAdjustments?: ImportedAdjustment[];
     /** The Config tab's choices of what the sheet shows; kept across re-imports. Optional. */
     sheetConfig?: SheetConfig;
     notes: string;

@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## [2026-10-16]
+
+- pf1e-char-sheet v1.1.0-beta.1:
+    - mod API 0.6 (`@planarally/mod-api` ^0.6.0):
+        - rolls go through PlanarAlly's new dice API when the server has it: one click, PlanarAlly's own
+          roll (3D dice, notification, history), shared as the player's dice tool or "for me only".
+          Older servers keep the dice panel / quick roll
+        - compendium entries are registered with the new schema (`system: "pf1e"`, the rule's kind) and
+          read back through `compendium.getEntries`; older servers still get the `kind` they read
+        - the Custom Data lease uses `customData.loadAndDropState` when there is one
+        - the natural 20 / 1 animation also reads the new roll outcome format
+    - the Diagnostics reports show the server's PlanarAlly release and build (Docker tag and commit, or
+      git describe), explained, and the mod API features it has, so a dev and a stable server can be
+      told apart in a bug report
+    - one compendium entry per special across level-ups: specials are stored under their name without
+      the per-level part ("Trap Sense +2 (Ex)" -> "Trap Sense"); different texts with the same short
+      name get their source added. 1.0 sheets move over when opened, and the old full-name entries stop
+      being listed once their text is under the short name (they're kept, so nothing breaks)
+    - CharSheet.vue is being split up: the Adjustments, Feats, Inventory, Config and Diagnostics tabs and
+      the rule card are now components in `src/sheet/`, sharing the sheet through `context.ts`, and the
+      styles moved to `src/sheet/sheet.scss`
+    - mutagens and cognatogens from the Hero Lab export become adjustments ("From Hero Lab" on the
+      Adjustments tab). One that was active in the export (its penalty already shows in the scores)
+      starts ticked and is taken out of the numbers when unticked; the guess can be corrected on the tab
+    - ticking a mutagen drinks a dose: one use of its resource on the Resources tab (and its tracker)
+    - an investigator's Studied Combat becomes an adjustment too: insight bonus on melee attacks and a
+      bonus on melee damage, from its special
+    - finesse weapons: a melee weapon that Hero Lab's numbers show attacking with Dex follows Dex
+      adjustments, and adds Dex to damage with Fencing Grace, Slashing Grace, Dervish Dance or agile
+    - Reduce Person built-in adjustment
+    - a spell prepared more than once ("Cat's Grace (x2)") is listed once with its count, so its rule
+      card and compendium entry are the spell's own
+    - fix: a lower Dex no longer lowers flat-footed AC while its modifier stays positive
+
 ## [2026-10-13]
 
 - pf1e-char-sheet v1.0.0, the first stable release:

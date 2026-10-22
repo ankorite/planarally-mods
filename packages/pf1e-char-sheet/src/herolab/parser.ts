@@ -28,6 +28,8 @@ import {
     abilityModifier,
     emptyCharacter,
     type AbilityKey,
+    type AdjustmentEffect,
+    type ImportedAdjustment,
     type AbilityScores,
     type AttackEntry,
     type FeatEntry,
@@ -123,11 +125,14 @@ export function parseHeroLabXml(xmlText: string): PF1Character {
     parseCombat(character, result);
     parseSkills(character, result);
     parseFeats(character, result);
+    markDexWeapons(result);
     parseSpells(character, result);
     parseInventory(character, result);
+    parseMutagens(character, result);
     parseResources(character, result);
     parseAuras(character, result);
     parseSpecials(character, result);
+    parseStudiedCombat(result);
 
     result.importedAt = new Date().toISOString();
 
@@ -290,6 +295,48 @@ function parseCombat(character: Element, out: PF1Character): void {
     out.combat.attacks = attacks;
 }
 
+// ---- Dex-based melee weapons -----------------------------------------------------------------
+//
+// Hero Lab doesn't say which ability a weapon attacks with, but its attack shows it: Dresdon's rapier at
+// +18 sits near his ranged base attack (+15, with Dex) and far from his melee one (+5, with Str), so it
+// attacks with Dex (Weapon Finesse). Only judged when the two base attacks are clearly apart - when Str
+// and Dex are close it hardly matters. Such a weapon adds Dex to damage too with the feat that says so
+// (Fencing Grace for a rapier, ...) or the agile property, when its damage shows it.
+
+const DEX_DAMAGE_FEATS: [RegExp, (weapon: string, feat: string) => boolean][] = [
+    [/^fencing grace\b/i, (w) => /\brapier\b/i.test(w)],
+    [/^dervish dance\b/i, (w) => /\bscimitar\b/i.test(w)],
+    [
+        /^(slashing|starry) grace\b/i,
+        (w, feat) => {
+            const chosen = /\(([^)]+)\)/.exec(feat)?.[1]?.toLowerCase();
+            return chosen !== undefined && w.toLowerCase().includes(chosen);
+        },
+    ],
+];
+
+function markDexWeapons(out: PF1Character): void {
+    const first = (text: string | undefined): number | undefined => {
+        const m = /[+-]?\d+/.exec(text ?? "");
+        return m ? Number(m[0]) : undefined;
+    };
+    const melee = first(out.combat.meleeAttack);
+    const ranged = first(out.combat.rangedAttack);
+    if (melee === undefined || ranged === undefined || Math.abs(ranged - melee) < 3) return;
+    for (const atk of out.combat.attacks) {
+        const bonus = first(atk.bonus);
+        if (atk.kind !== "melee" || bonus === undefined) continue;
+        if (Math.abs(bonus - ranged) >= Math.abs(bonus - melee)) continue;
+        atk.finesse = true;
+        const dexFeat =
+            /\bagile\b/i.test(atk.name) ||
+            out.feats.some((f) => DEX_DAMAGE_FEATS.some(([feat, fits]) => feat.test(f.name) && fits(atk.name, f.name)));
+        // And only if Hero Lab's damage carries Dex (it leaves it off a weapon that isn't wielded).
+        const flat = (/^\s*\d+d\d+\s*([+-]\s*\d+)?/i.exec(atk.damage)?.[1] ?? "0").replace(/\s+/g, "");
+        atk.dexDamage = dexFeat && Number(flat) >= abilityModifier(out.abilities.dex);
+    }
+}
+
 function parseSkills(character: Element, out: PF1Character): void {
     const skills: SkillEntry[] = [];
     for (const skill of ownAll(own(character, "skills"), "skill")) {
@@ -424,8 +471,10 @@ function toSpells(nodes: Element[]): SpellEntry[] {
         const spell = toSpell(node);
         const key = `${spell.name.toLowerCase()}|${spell.level}`;
         const seen = byKey.get(key);
-        if (seen) seen.prepared ||= spell.prepared;
-        else byKey.set(key, spell);
+        if (seen) {
+            seen.prepared ||= spell.prepared;
+            if (spell.count) seen.count = Math.max(seen.count ?? 1, spell.count);
+        } else byKey.set(key, spell);
     }
     return Array.from(byKey.values());
 }
@@ -433,8 +482,11 @@ function toSpells(nodes: Element[]): SpellEntry[] {
 function toSpell(s: Element): SpellEntry {
     const text = own(s, "description")?.textContent;
     const optional = (name: string): string | undefined => attr(s, name) || undefined;
+    // A prepared spell taken more than once is exported as "Cat's Grace (x2)": one spell, two copies.
+    const copies = /^(.*?)\s*\(x(\d+)\)$/i.exec(attr(s, "name"));
     return {
-        name: attr(s, "name"),
+        name: copies ? copies[1]! : attr(s, "name"),
+        ...(copies ? { count: Number(copies[2]) } : {}),
         level: num(attr(s, "level")),
         description: excerpt(text),
         fullText: fullText(text),
@@ -454,6 +506,14 @@ function toSpell(s: Element): SpellEntry {
  * The key drops the parenthesised part, so "(20 rounds/day)" becoming "(22 rounds/day)" on a
  * level-up still updates the same tracker.
  */
+/** A tracked resource's key: the name without its parenthesised part, so "(3/day)" -> "(4/day)" keeps it. */
+function resourceKey(name: string): string {
+    return `res:${name
+        .replace(/\s*\(.*$/, "")
+        .trim()
+        .toLowerCase()}`;
+}
+
 function parseResources(character: Element, out: PF1Character): void {
     const resources: SheetResource[] = [];
     const seen = new Set<string>();
@@ -464,11 +524,7 @@ function parseResources(character: Element, out: PF1Character): void {
     };
     for (const r of ownAll(own(character, "trackedresources"), "trackedresource")) {
         const name = attr(r, "name");
-        const base = name
-            .replace(/\s*\(.*$/, "")
-            .trim()
-            .toLowerCase();
-        push(`res:${base}`, name, num(attr(r, "max")), num(attr(r, "used")));
+        push(resourceKey(name), name, num(attr(r, "max")), num(attr(r, "used")));
     }
     for (const sc of out.spellcasting) {
         const cls = sc.className.replace(/\s*\(.*$/, "").trim();
@@ -494,6 +550,93 @@ function parseInventory(character: Element, out: PF1Character): void {
         };
     });
     out.inventory = items;
+}
+
+// ---- mutagens ----------------------------------------------------------------------------
+//
+// Hero Lab has an alchemist or investigator add each brewed mutagen as an item named after what it
+// does: "Mutagen: +4 Dex, -2 Wis, +2 Nat AC" (likewise cognatogens, and greater or grand versions).
+// Each becomes an adjustment on the Adjustments tab. Hero Lab doesn't say whether it was drunk when the
+// file was exported, but a mutagen's penalty shows on the ability score (Wis 13 becoming 11), so a
+// mutagen whose every penalty is already in the scores is taken as active in the export.
+
+const MUTAGEN_RE = /^((?:greater |grand )?(?:inspiring )?(?:mutagen|cognatogen))\s*:\s*(.+)$/i;
+const MUTAGEN_PART_RE = /^([+-]\d+)\s+(str|dex|con|int|wis|cha|nat(?:ural)?\.?\s*(?:armor|ac)|ac)\b/i;
+
+/** The effects of a Hero Lab mutagen name, or undefined if it isn't one. */
+export function mutagenEffects(name: string): AdjustmentEffect[] | undefined {
+    const m = MUTAGEN_RE.exec(name.trim());
+    if (!m) return undefined;
+    const effects: AdjustmentEffect[] = [];
+    for (const part of m[2]!.split(",")) {
+        const p = MUTAGEN_PART_RE.exec(part.trim());
+        if (!p) continue;
+        const value = Number(p[1]);
+        const what = p[2]!.toLowerCase();
+        if (/^(str|dex|con|int|wis|cha)$/.test(what)) {
+            // The bonus is alchemical; a penalty has no type (penalties always add up).
+            effects.push({ target: what as AbilityKey, type: value > 0 ? "alchemical" : "untyped", value });
+        } else {
+            effects.push({ target: "ac", type: "natural", value });
+        }
+    }
+    return effects.length ? effects : undefined;
+}
+
+function parseMutagens(character: Element, out: PF1Character): void {
+    // Each mutagen is a tracked resource too (doses brewed); drinking one from the sheet spends it.
+    const tracked = new Set(
+        ownAll(own(character, "trackedresources"), "trackedresource").map((el) => attr(el, "name")),
+    );
+    const names = [...ownAll(own(character, "magicitems"), "item"), ...ownAll(own(character, "gear"), "item")].map(
+        (el) => attr(el, "name"),
+    );
+    names.push(...tracked);
+    const found = new Map<string, ImportedAdjustment>();
+    for (const name of names) {
+        const effects = mutagenEffects(name);
+        const key = `hl:${slug(name)}`;
+        if (!effects || found.has(key)) continue;
+        const penalties = effects.filter((e) => e.value < 0 && e.target in out.abilities);
+        const inExport =
+            penalties.length > 0 &&
+            penalties.every((e) => {
+                const k = e.target as AbilityKey;
+                return out.abilities[k] - (out.abilityBase?.[k] ?? out.abilities[k]) <= e.value;
+            });
+        found.set(key, {
+            key,
+            name: name.replace(/\s*:\s*/, " (").trim() + ")",
+            effects,
+            inExport,
+            ...(tracked.has(name) ? { resource: resourceKey(name) } : {}),
+        });
+    }
+    if (found.size) out.importedAdjustments = [...(out.importedAdjustments ?? []), ...found.values()];
+}
+
+// An investigator's Studied Combat, from its special: "Studied Combat (+3, 4 rounds) (Ex)" - an insight
+// bonus on melee attacks and a bonus on melee damage, both the +3, against the studied target. Hero Lab
+// doesn't say whether it was on, and it's for one target at a time, so it starts off.
+function parseStudiedCombat(out: PF1Character): void {
+    for (const special of out.specials ?? []) {
+        const m = /^studied combat\s*\(\s*\+(\d+)/i.exec(special.name);
+        if (!m) continue;
+        const value = Number(m[1]);
+        out.importedAdjustments = [
+            ...(out.importedAdjustments ?? []),
+            {
+                key: "hl:studied-combat",
+                name: `Studied Combat (+${value})`,
+                effects: [
+                    { target: "meleeAttack", type: "insight", value },
+                    { target: "meleeDamage", type: "untyped", value },
+                ],
+                inExport: false,
+            },
+        ];
+        return;
+    }
 }
 
 // ---- auras -------------------------------------------------------------------------------

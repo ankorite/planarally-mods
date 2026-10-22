@@ -15,8 +15,9 @@ import type { GameApi } from "@planarally/mod-api";
 import { buildElements, CD_SOURCE } from "./customdata";
 import type { PF1Character } from "./data";
 import { trackedKeys } from "./resources";
-import { resolveFormula } from "./roll";
+import { hasNativeDice, resolveFormula } from "./roll";
 import { rulesStatus } from "./rules";
+import { formatModApi, formatServerVersion, readServerVersion } from "./serverinfo";
 import { isHpTrackerName } from "./trackers";
 
 type Dict = Record<string, unknown>;
@@ -554,7 +555,8 @@ export async function buildHealthCheck(
             return typeof v === "string" ? v : "?";
         };
         ok(`mod: ${meta("name")} v${meta("version")}`);
-        ok(`PlanarAlly: GET /api/version -> ${await fetchText("/api/version")}`);
+        ok(`PlanarAlly: ${formatServerVersion(await readServerVersion())}`);
+        ok(`mod API: ${formatModApi(api)}`);
         ok(`browser: ${navigator.userAgent}`);
         ok(`secure context: ${String(window.isSecureContext)} (copy-to-clipboard needs true)`);
         const game = get(sstate(api, "game"), "reactive");
@@ -692,6 +694,11 @@ export async function buildHealthCheck(
             }
         }
         ok(`${good} of ${rolls.length} formulas resolve${engine === undefined ? "" : " and parse"}`);
+        ok(
+            hasNativeDice(api)
+                ? "rolls go through PlanarAlly's dice API (mod API 0.6)"
+                : "no dice API on this server (mod API before 0.6): rolls use the dice panel or the 2d engine",
+        );
     });
 
     await section("Rules text", () => {
@@ -904,7 +911,13 @@ export async function buildApiDump(api: unknown, shapeId: number | undefined): P
     };
 
     await run("env", sectionEnv);
-    out.push(`## server version\nGET /api/version -> ${await fetchText("/api/version")}`, "");
+    out.push(
+        "## server version",
+        `PlanarAlly: ${formatServerVersion(await readServerVersion())}`,
+        `mod API: ${formatModApi(api)}`,
+        `GET /api/version -> ${await fetchText("/api/version")}`,
+        "",
+    );
     await run("top level", () => sectionTopLevel(api));
     await run("hooks / eventBus / gameplay", () => [
         ...describeTree("api.hooks", get(api, "hooks"), 2, { sources: true, maxSources: 10 }),

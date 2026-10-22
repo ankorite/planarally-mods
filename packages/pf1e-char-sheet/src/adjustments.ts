@@ -16,15 +16,18 @@ import {
 // roll buttons and the Custom Data export (dice macros) use it, so toggling an adjustment changes
 // every number and roll at once.
 //
+// Mutagens are the exception: Hero Lab exports them as items, so they're read from the file
+// (ImportedAdjustment), along with whether they were active - then their effect is already in the
+// numbers, and switching one off takes it back out.
+//
 // Simplifications: an ability change adds its modifier difference to what that ability feeds (melee
-// attack/damage and CMB for Str, ranged attack, AC, Ref, initiative and CMD for Dex, Fort for Con,
-// Will for Wis, and skills) - but not HP, and Str to damage is always x1 (not x1.5 two-handed).
-// Situational parts ("+2 vs fear") are left out.
+// attack/damage and CMB for Str - or Dex for a finesse weapon, ranged attack, AC, Ref, initiative and CMD for Dex, Fort and max HP
+// for Con, Will for Wis, and skills). Situational parts ("+2 vs fear") are left out.
 
 export interface AdjustmentDef {
     key: string;
     name: string;
-    group: "Spells" | "Class abilities" | "Combat" | "Conditions";
+    group: "From Hero Lab" | "Spells" | "Class abilities" | "Combat" | "Conditions";
     effects: AdjustmentEffect[];
     /** Haste: one extra attack at the highest bonus on a full attack. */
     extraAttack?: boolean;
@@ -116,6 +119,12 @@ export const BUILTIN_ADJUSTMENTS: AdjustmentDef[] = [
         name: "Enlarge Person",
         group: "Spells",
         effects: [fx("str", "size", 2), fx("dex", "size", -2), fx("attack", "size", -1), fx("ac", "size", -1)],
+    },
+    {
+        key: "reduce-person",
+        name: "Reduce Person",
+        group: "Spells",
+        effects: [fx("str", "size", -2), fx("dex", "size", 2), fx("attack", "size", 1), fx("ac", "size", 1)],
     },
     inspireCourage(1),
     inspireCourage(2),
@@ -238,9 +247,6 @@ export function stackEffects(effects: AdjustmentEffect[]): number {
     return total;
 }
 
-const forTargets = (effects: AdjustmentEffect[], ...targets: AdjustmentTarget[]): AdjustmentEffect[] =>
-    effects.filter((e) => targets.includes(e.target));
-
 // AC: armor / shield / natural don't apply to touch AC; dodge (and Dex) don't apply to flat-footed AC.
 // CMD takes the AC bonus types that also protect against maneuvers.
 const NOT_TOUCH: ReadonlySet<BonusType> = new Set(["armor", "shield", "natural"]);
@@ -259,7 +265,17 @@ const CMD_TYPES: ReadonlySet<BonusType> = new Set([
 
 // ---- applying ----------------------------------------------------------------------------------------
 
-/** The enabled adjustments of a character, built-in and custom, in a stable order. */
+/** The adjustments read from the export (mutagens), as adjustments. */
+export function importedAdjustments(c: Pick<PF1Character, "importedAdjustments">): AdjustmentDef[] {
+    return (c.importedAdjustments ?? []).map((a) => ({
+        key: a.key,
+        name: a.name,
+        group: "From Hero Lab",
+        effects: a.effects,
+    }));
+}
+
+/** The enabled adjustments of a character - from the export, built-in and custom - in a stable order. */
 export function enabledAdjustments(c: PF1Character): AdjustmentDef[] {
     const state = c.adjustments;
     if (!state?.enabled.length) return [];
@@ -270,7 +286,7 @@ export function enabledAdjustments(c: PF1Character): AdjustmentDef[] {
         group: "Spells",
         effects: a.effects,
     }));
-    return [...BUILTIN_ADJUSTMENTS, ...custom].filter((a) => on.has(a.key));
+    return [...importedAdjustments(c), ...BUILTIN_ADJUSTMENTS, ...custom].filter((a) => on.has(a.key));
 }
 
 const ABILITIES: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
@@ -331,24 +347,35 @@ export function hitDice(c: Pick<PF1Character, "identity" | "classes">): number {
  */
 export function applyAdjustments(c: PF1Character): PF1Character {
     const active = enabledAdjustments(c);
-    if (!active.length) return c;
+    // What the imported numbers already include: the mutagens Hero Lab had active.
+    const baked = (c.importedAdjustments ?? []).filter((a) => a.inExport).flatMap((a) => a.effects);
+    if (!active.length && !baked.length) return c;
     const effects = active.flatMap((a) => a.effects);
     const extraAttack = active.some((a) => a.extraAttack);
     const out: PF1Character = JSON.parse(JSON.stringify(c)) as PF1Character;
+
+    // Every change is "what's switched on" minus "what the export already counts", each stacked by the
+    // PF1 rules - so a mutagen that's on and in the export changes nothing, and switched off it's
+    // taken out, while a buff of the same bonus type stacks against it correctly.
+    const net = (pick: (e: AdjustmentEffect) => boolean): number =>
+        stackEffects(effects.filter(pick)) - stackEffects(baked.filter(pick));
+    const of =
+        (...targets: AdjustmentTarget[]) =>
+        (e: AdjustmentEffect): boolean =>
+            targets.includes(e.target);
 
     // Ability scores, and how much each modifier moved.
     const modDelta = {} as Record<AbilityKey, number>;
     for (const k of ABILITIES) {
         const before = c.abilities[k];
-        const after = before + stackEffects(forTargets(effects, k));
+        const after = before + net(of(k));
         out.abilities[k] = after;
         modDelta[k] = abilityModifier(after) - abilityModifier(before);
     }
 
     // AC, per bonus type so each lands on the right AC values. A Dex change only counts up to the armor's
     // maximum Dex bonus (Hero Lab's "Max Dex Bonus" penalty), as Hero Lab's own AC does.
-    const acEffects = forTargets(effects, "ac");
-    const acBy = (keep: (t: BonusType) => boolean): number => stackEffects(acEffects.filter((e) => keep(e.type)));
+    const acBy = (keep: (t: BonusType) => boolean): number => net((e) => e.target === "ac" && keep(e.type));
     const ac = acBy(() => true);
     const maxDex = c.combat.maxDex;
     const dexToAc = (score: number): number => {
@@ -358,26 +385,27 @@ export function applyAdjustments(c: PF1Character): PF1Character {
     const acDex = dexToAc(out.abilities.dex) - dexToAc(c.abilities.dex);
     out.combat.ac.normal += ac + acDex;
     out.combat.ac.touch += acBy((t) => !NOT_TOUCH.has(t)) + acDex;
-    out.combat.ac.flatFooted += acBy((t) => !NOT_FLAT_FOOTED.has(t)) + Math.min(0, acDex);
+    // Flat-footed AC has no Dex bonus, only a Dex penalty: it changes only as far as the modifier is below 0.
+    const ffDex = Math.min(0, dexToAc(out.abilities.dex)) - Math.min(0, dexToAc(c.abilities.dex));
+    out.combat.ac.flatFooted += acBy((t) => !NOT_FLAT_FOOTED.has(t)) + ffDex;
 
     // Max HP follows a Constitution change: the change in modifier for every hit die. (Current HP is the
     // tracker's and isn't touched.)
     out.combat.hp.max += modDelta.con * hitDice(c);
 
     // Saves.
-    const save = (k: "fort" | "ref" | "will", ability: AbilityKey): number =>
-        stackEffects(forTargets(effects, "saves", k)) + modDelta[ability];
+    const save = (k: "fort" | "ref" | "will", ability: AbilityKey): number => net(of("saves", k)) + modDelta[ability];
     out.combat.saves.fort.total += save("fort", "con");
     out.combat.saves.ref.total += save("ref", "dex");
     out.combat.saves.will.total += save("will", "wis");
 
-    out.combat.initiative += stackEffects(forTargets(effects, "init")) + modDelta.dex;
-    out.combat.speed += stackEffects(forTargets(effects, "speed"));
+    out.combat.initiative += net(of("init")) + modDelta.dex;
+    out.combat.speed += net(of("speed"));
 
     // Attacks and combat maneuvers.
-    const meleeAttack = stackEffects(forTargets(effects, "attack", "meleeAttack")) + modDelta.str;
-    const rangedAttack = stackEffects(forTargets(effects, "attack", "rangedAttack")) + modDelta.dex;
-    const meleeDamage = stackEffects(forTargets(effects, "damage", "meleeDamage"));
+    const meleeAttack = net(of("attack", "meleeAttack")) + modDelta.str;
+    const rangedAttack = net(of("attack", "rangedAttack")) + modDelta.dex;
+    const meleeDamage = net(of("damage", "meleeDamage"));
     // Strength to damage: 1x, or 1.5x a bonus for a two-handed weapon (a penalty is never multiplied).
     const strToDamage = (score: number, twoHanded: boolean): number => {
         const mod = abilityModifier(score);
@@ -385,21 +413,23 @@ export function applyAdjustments(c: PF1Character): PF1Character {
     };
     const strDamage = (twoHanded: boolean): number =>
         strToDamage(out.abilities.str, twoHanded) - strToDamage(c.abilities.str, twoHanded);
-    const rangedDamage = stackEffects(forTargets(effects, "damage"));
+    const rangedDamage = net(of("damage"));
     out.combat.cmb += meleeAttack;
-    out.combat.cmd +=
-        stackEffects(forTargets(effects, "cmd")) +
-        stackEffects(acEffects.filter((e) => CMD_TYPES.has(e.type))) +
-        modDelta.str +
-        modDelta.dex;
+    out.combat.cmd += net(of("cmd")) + acBy((t) => CMD_TYPES.has(t)) + modDelta.str + modDelta.dex;
+    // A finesse weapon (see markDexWeapons in the parser) attacks with Dex, and may add Dex to damage.
+    const finesseAttack = meleeAttack - modDelta.str + modDelta.dex;
     for (const atk of out.combat.attacks) {
         const ranged = atk.kind === "ranged";
-        atk.bonus = adjustAttackBonus(atk.bonus, ranged ? rangedAttack : meleeAttack, extraAttack);
-        atk.damage = adjustDamage(atk.damage, ranged ? rangedDamage : meleeDamage + strDamage(atk.twoHanded === true));
+        const attack = ranged ? rangedAttack : atk.finesse ? finesseAttack : meleeAttack;
+        atk.bonus = adjustAttackBonus(atk.bonus, attack, extraAttack);
+        const damage = ranged
+            ? rangedDamage
+            : meleeDamage + (atk.dexDamage ? modDelta.dex : strDamage(atk.twoHanded === true));
+        atk.damage = adjustDamage(atk.damage, damage);
     }
 
     // Skills.
-    const skills = stackEffects(forTargets(effects, "skills"));
+    const skills = net(of("skills"));
     for (const skill of out.skills) skill.total += skills + modDelta[skill.ability];
 
     return out;
