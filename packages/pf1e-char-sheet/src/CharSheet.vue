@@ -2,7 +2,7 @@
 import type { LocalId } from "@planarally/mod-api";
 import { ref, watch, computed, onBeforeUnmount, provide } from "vue";
 
-import { isCharacterShape, isDm as viewerIsDm } from "./access";
+import { applySheetAccess, isCharacterShape, isDm as viewerIsDm } from "./access";
 import { applyAdjustments, enabledAdjustments } from "./adjustments";
 import { syncAuras } from "./auras";
 import { naturalOf, playCrit } from "./crits";
@@ -113,9 +113,18 @@ watch(
         load(shape);
         currentLocalId.value = shape;
         refreshLease();
+        // On the DM's client: a monster's or NPC's sheet is the DM's only, a character's its owners'
+        // (access.ts; on servers with DataBlock access levels).
+        void keepSheetAccess(shape);
     },
     { immediate: true },
 );
+
+async function keepSheetAccess(shape: LocalId, waitMs = 3000): Promise<void> {
+    const outcome = await applySheetAccess(api, shape, isCharacterShape(api, shape), DATA_BLOCK_NAME, waitMs);
+    if (outcome === "set") console.info("[pf1e-sheet] sheet access updated for this token");
+    else if (outcome === "failed") console.warn("[pf1e-sheet] couldn't change this sheet's access");
+}
 
 // A character gets the full sheet; any other token (monsters, NPCs - the tab only shows for the DM)
 // gets the limited one (no Feats or Inventory tab).
@@ -413,6 +422,8 @@ async function onFileSelected(event: Event): Promise<void> {
         }
 
         write(character);
+        // Before the first save, so a new monster's sheet is created DM-only (access.ts).
+        if (id !== undefined) await keepSheetAccess(id, 0);
         save();
 
         if (id === undefined) {

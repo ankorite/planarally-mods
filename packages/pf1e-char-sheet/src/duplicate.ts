@@ -1,5 +1,6 @@
 import type { GameApi, LocalId } from "@planarally/mod-api";
 
+import { applySheetAccess } from "./access";
 import { holdCustomDataLease, buildElements, syncCustomData } from "./customdata";
 import { DATA_BLOCK_NAME, type PF1Character } from "./data";
 
@@ -135,6 +136,9 @@ export async function duplicateToken(api: GameApi, shape: LocalId, character: PF
     }
     if (!block) return { ok: false, copy, message: "Couldn't create the copy's sheet - import the sheet onto it." };
     block.updateData(data);
+    // The copy is a monster or NPC too: its sheet is the DM's only, from creation where the server has
+    // access levels (access.ts).
+    await applySheetAccess(api, copy, false, DATA_BLOCK_NAME, 0);
     block.sync();
     await sleep(3000);
     if (!block.existsOnServer) block.sync();

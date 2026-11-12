@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## [2026-11-12]
+
+- pf1e-char-sheet v1.1.0-beta.2, for PlanarAlly's November `dev` additions (each only takes effect on a
+  server that has it; older servers are unchanged):
+    - DataBlock access levels: a monster's or NPC's sheet is made DM-only on the server, so a player
+      with edit access to the token can't read its stat block. New ones are created that way, older ones
+      switch when the DM opens them, and a token that became a character gets its owners' access back.
+      The Health check shows the sheet's access
+    - `provideApi`: other mods can read a token's sheet (adjusted or as stored), its roll field names
+      and rules text through `getModApi("pf1e-sheet")`; read-only, and a monster's sheet is DM-only
+
 ## [2026-10-16]
 
 - pf1e-char-sheet v1.1.0-beta.1:

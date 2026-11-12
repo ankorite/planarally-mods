@@ -12,8 +12,9 @@
 
 import type { GameApi } from "@planarally/mod-api";
 
+import { describeSheetAccess, isCharacterShape, sheetAccess } from "./access";
 import { buildElements, CD_SOURCE } from "./customdata";
-import type { PF1Character } from "./data";
+import { DATA_BLOCK_NAME, type PF1Character } from "./data";
 import { trackedKeys } from "./resources";
 import { hasNativeDice, resolveFormula } from "./roll";
 import { rulesStatus } from "./rules";
@@ -704,6 +705,20 @@ export async function buildHealthCheck(
     await section("Rules text", () => {
         ok(rulesStatus(api as GameApi));
         ok(`this sheet's data: ${Math.round(JSON.stringify(character).length / 1024)} KB`);
+    });
+
+    await section("Sheet access", () => {
+        const g = api as GameApi;
+        const shapeGlobal = shapeId === undefined ? undefined : g.getGlobalId(shapeId as never);
+        const block = shapeGlobal
+            ? g.getDataBlock({ category: "shape", shape: shapeGlobal, name: DATA_BLOCK_NAME })
+            : undefined;
+        const character = shapeId !== undefined && isCharacterShape(g, shapeId as never);
+        const want = sheetAccess(character);
+        ok(`this sheet: ${describeSheetAccess(block)}`);
+        ok(
+            `should be: read ${want.read}, write ${want.write} (${character ? "a character's owners" : "a monster or NPC: DM only"})`,
+        );
     });
 
     await section("Trackers (x/day, x/round, spell slots)", () => {

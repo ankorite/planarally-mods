@@ -5,6 +5,7 @@ import CharSheet from "./CharSheet.vue";
 import { disposeCritWatcher, installCritWatcher } from "./crits";
 import { DATA_BLOCK_NAME, emptyCharacter, type PF1Character } from "./data";
 import { diagState, exposeDebugHandle, installBusListeners, note, removeDebugHandle } from "./diagnostics";
+import { provideSheetApi } from "./modapi";
 import { disposeRules, initRules } from "./rules";
 import { isHpTrackerName } from "./trackers";
 
@@ -22,6 +23,7 @@ function init(meta: ApiModMeta): void {
 }
 
 let modTag: string | undefined;
+let stopProvidingApi: (() => void) | undefined;
 
 function initGame(gameApi: GameApi): void {
     api = gameApi;
@@ -42,6 +44,9 @@ function initGame(gameApi: GameApi): void {
         console.warn("[pf1e-sheet] natural 20/1 effect couldn't start", e);
     }
 
+    // Other mods can read the sheet (modapi.ts), on a PlanarAlly with provideApi.
+    stopProvidingApi = provideSheetApi(api, modVersion);
+
     // Tracker -> sheet. PA emits "tracker:updated" on its event bus after every tracker change,
     // whether it came from the local UI or from another player via the server.
     api.eventBus.on("tracker:updated", onTrackerUpdated);
@@ -58,6 +63,8 @@ function initGame(gameApi: GameApi): void {
 // PlanarAlly removes the tab, event-bus listeners and hooks itself after this returns.
 function dispose(): void {
     removeDebugHandle();
+    stopProvidingApi?.();
+    stopProvidingApi = undefined;
     disposeRules();
     disposeCritWatcher();
 }
