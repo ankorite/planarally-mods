@@ -114,6 +114,9 @@ The workflow refuses a tag that doesn't match the version in `mod.toml`.
 - `src/rules.ts` — rules text of feats, spells, skills and specials in the campaign's room blocks and
   PlanarAlly's compendium
 - `src/duplicate.ts` — duplicates a monster/NPC token together with its sheet
+- `src/access.ts` — DM / character checks, and who may read and write each token's sheet
+- `src/modapi.ts` — the read-only API other mods can use (see For other mods)
+- `src/serverinfo.ts` — PlanarAlly's version and mod API features, for the Diagnostics reports
 
 ## Importing from Hero Lab
 
@@ -481,6 +484,13 @@ feet.
 - **The full sheet** only appears on characters the viewer can edit; the DM can always see it.
 - **The limited sheet** (monsters and NPCs) appears on every other token, for the DM only. A DM
   previewing as a "fake player" doesn't see it.
+- **The sheet data itself:** on a PlanarAlly with DataBlock access levels (the `dev` branch from
+  November 2026), the server enforces this too. A character's sheet can be read and changed by the
+  users who can edit the token (PlanarAlly's default). A monster's or NPC's sheet is made **DM only**:
+  a new one is created that way, and an older one is switched over when the DM opens it, as is a
+  token that has since become a character (back to its owners). Without access levels, only the tab
+  is hidden, so a player with edit access to a monster token could still read its sheet data. The
+  Health check shows what the server has for the token.
 - **The Diagnostics tab** is DM-only.
 - **The update message** (a newer version on GitHub) is DM-only.
 
@@ -516,3 +526,29 @@ the next new version.
 
 The **S / M / L** buttons at the right of the tab row set the sheet width (remembered per browser).
 Wide tables scroll inside their own container.
+
+## For other mods
+
+On a PlanarAlly with `provideApi` (the `dev` branch from November 2026), the sheet offers a read-only
+API to other mods under its tag, `pf1e-sheet`. A combat tracker or a homebrew-rules mod can read a
+character's numbers without parsing Hero Lab files itself:
+
+```ts
+const pf1e = api.getModApi<Pf1eSheetApi>("pf1e-sheet"); // undefined while the sheet isn't loaded
+
+const character = await pf1e?.getCharacter(shape); // as the sheet shows it: adjustments applied
+const stored = await pf1e?.getCharacter(shape, { adjusted: false }); // the import as stored
+const fields = await pf1e?.getRollFields(shape); // Custom Data names for rolls
+await api.dice.roll(`1d20 + {${fields!.will}}`, { shape, label: "Will save" });
+pf1e?.ruleText("feat", "Power Attack"); // full rules text from the "PF1e (Hero Lab)" compendium
+```
+
+- `getModApi` is reactive: use it in a `computed` or `watch` to follow the sheet mod loading or
+  unloading.
+- `getCharacter` returns a copy in the sheet's `PF1Character` format (`src/data.ts`), or undefined
+  when the token has no imported sheet or the user may not read it. A monster's or NPC's sheet is only
+  given to the DM.
+- `getRollFields` gives the field names the sheet exports for that token: ability modifiers,
+  initiative, saves, CMB, one per skill and one per attack (`SheetNames` in `src/customdata.ts`).
+- Nothing in it changes a sheet. `apiVersion` (now 1) goes up if a change could break a mod using
+  it; the interface is `Pf1eSheetApi` in `src/modapi.ts`, to copy into your own mod.
